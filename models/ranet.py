@@ -149,6 +149,9 @@ class RANet(nn.Module):
         self.conv4_x = self._make_layer(block, 256, num_block[2], 2)
         self.conv5_x = self._make_layer(block, 512, num_block[3], 2)
 
+        self.ca = CALayer(64 + 128 + 256 + 512)
+        self.pa = PALayer(64 + 128 + 256 + 512)
+
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
@@ -179,11 +182,14 @@ class RANet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        output = self.conv1(x)
-        output = self.conv2_x(output)
-        output = self.conv3_x(output)
-        output = self.conv4_x(output)
-        output = self.conv5_x(output)
+        x1 = self.conv1(x)
+        x2 = self.conv2_x(x1)
+        x3 = self.conv3_x(x2)
+        x4 = self.conv4_x(x3)
+        x5 = self.conv5_x(x4)
+        output = self.ca(torch.cat([x2, x3, x4, x5], dim=1))
+        output = self.pa(output)
+
         output = self.avg_pool(output)
         output = output.view(output.size(0), -1)
         print(output.size())
@@ -192,7 +198,7 @@ class RANet(nn.Module):
         return output
     
 def ranet18():
-    """ return a ResNet 18 object
+    """ return a RANet 18 object
     """
     return RANet(Residual_Attention_Block, [2, 2, 2, 2])
 

@@ -105,18 +105,12 @@ class CPRFNet(nn.Module):
         res3 = self.g3(res2)
 
         w = self.ca(torch.cat([res1, res2, res3], dim=1))
-        print(w.size())
         w = w.view(-1, 3, self.dim)[:, :, :, None, None]
-        print(w.size())
         out = w[:, 0, ::] * res1 + w[:, 1, ::] * res2 + w[:, 2, ::] * res3
-        print(out.size())
         out = self.palayer(out)
-        print(out.size())
 
         output = self.avg_pool(out)
-        print(output.size())
         output = output.view(output.size(0), -1)
-        print(output.size())
         output = self.fc(output)
         return output
 
