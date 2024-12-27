@@ -152,6 +152,12 @@ def get_network(args):
     elif args.net == 'stochasticdepth101':
         from models.stochasticdepth import stochastic_depth_resnet101
         net = stochastic_depth_resnet101()
+    elif args.net == 'single_branch_cprfnet':
+        from models.single_branch_cprfnet import CPRFNet
+        net = CPRFNet()
+    elif args.net == 'cprfnet':
+        from models.cprfnet import CPRFNet
+        net = CPRFNet()
 
     else:
         print('the network name you have entered is not supported yet')
