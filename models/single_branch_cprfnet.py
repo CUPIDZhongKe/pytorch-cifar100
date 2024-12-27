@@ -60,6 +60,7 @@ class Residual_Attention_Block(nn.Module):
 
         x3_1 = x1 + x3
 
+        print("x3_1: ", x3_1.size())
         x4 = self.ca(x3_1)  
         x5 = self.pa(x4)
 

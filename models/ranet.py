@@ -2,6 +2,36 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class PALayer(nn.Module):
+    def __init__(self, channel):
+        super(PALayer, self).__init__()
+        self.pa = nn.Sequential(
+            nn.Conv2d(channel, channel // 8, 1, padding=0, bias=True),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channel // 8, 1, 1, padding=0, bias=True),
+            nn.Sigmoid()
+        )
+    def forward(self, x):
+        y = self.pa(x)
+        return x * y
+
+
+
+class CALayer(nn.Module):
+    def __init__(self, channel):
+        super(CALayer, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.ca = nn.Sequential(
+            nn.Conv2d(channel, channel // 8, 1, padding=0, bias=True),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channel // 8, channel, 1, padding=0, bias=True),
+            nn.Sigmoid()
+        )
+    def forward(self, x):
+        y = self.avg_pool(x)
+        y = self.ca(y)
+        return x * y
+
 
 class Up(nn.Module):
 
@@ -71,78 +101,107 @@ class CAB(nn.Module):
         y = self.avg_pool(x)
         y = self.conv_du(y)
         return x * y
+    
 
+class Residual_Attention_Block(nn.Module):
 
-class RAB(nn.Module):
-    def __init__(self, in_channels=64, out_channels=64, bias=True):
-        super(RAB, self).__init__()
-        kernel_size = 3
-        stride = 1
-        padding = 1
-        layers = []
-        layers.append(nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding, bias=bias))
-        layers.append(nn.ReLU(inplace=True))
-        layers.append(nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding, bias=bias))
-        self.res = nn.Sequential(*layers)
-        self.sab = SAB()
+    expansion = 1   #the expansion of Residual Block
 
+    def __init__(self, in_channels=64, out_channels=64, stride=1):
+        super().__init__()
+
+        #residual function
+        self.res = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels * Residual_Attention_Block.expansion, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels * Residual_Attention_Block.expansion),
+            CALayer(out_channels),
+            PALayer(out_channels)
+        )
+
+        #shortcut
+        self.shortcut = nn.Sequential()
+
+        #the shortcut output dimension is not the same with residual function
+        #use 1*1 convolution to match the dimension
+        if stride != 1 or in_channels != Residual_Attention_Block.expansion * out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels * Residual_Attention_Block.expansion, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_channels * Residual_Attention_Block.expansion)
+            )
     def forward(self, x):
-        x1 = x + self.res(x)
-        x2 = x1 + self.res(x1)
-        x3 = x2 + self.res(x2)
-
-        x3_1 = x1 + x3
-        x4 = x3_1 + self.res(x3_1)
-        x4_1 = x + x4
-
-        x5 = self.sab(x4_1)
-        x5_1 = x + x5
-
-        return x5_1
-
-
+        return nn.ReLU(inplace=True)(self.res(x) + self.shortcut(x))
+    
 class RANet(nn.Module):
-    def __init__(self, in_nc=3, out_nc=3, nc=128, num_classes=100, bias=True):
+    def __init__(self, block, num_block, num_classes=100):
         super(RANet, self).__init__()
-        kernel_size = 3
+        
+        self.in_channels = 64 
 
-        self.conv_head = nn.Conv2d(in_nc, nc, kernel_size=kernel_size, padding=1, bias=bias)
-
-        self.rab = RAB(nc, nc, bias)
-
-        self.conv_tail = nn.Conv2d(nc, out_nc, kernel_size=kernel_size, padding=1, bias=bias)
-
-        self.down = nn.Conv2d(nc, nc, kernel_size=2, stride=2, bias=bias)
-
-        self.up = Up(nc, bias)
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True))
+        self.conv2_x = self._make_layer(block, 64, num_block[0], 1)
+        self.conv3_x = self._make_layer(block, 128, num_block[1], 2)
+        self.conv4_x = self._make_layer(block, 256, num_block[2], 2)
+        self.conv5_x = self._make_layer(block, 512, num_block[3], 2)
 
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(out_nc, num_classes)
+        self.fc = nn.Linear(512 * block.expansion, num_classes)
+
+    def _make_layer(self, block, out_channels, num_blocks, stride):
+        """make resnet layers(by layer i didnt mean this 'layer' was the
+        same as a neuron netowork layer, ex. conv layer), one layer may
+        contain more than one residual block
+
+        Args:
+            block: block type, basic block or bottle neck block
+            out_channels: output depth channel number of this layer
+            num_blocks: how many blocks per layer
+            stride: the stride of the first block of this layer
+
+        Return:
+            return a resnet layer
+        """
+
+        # we have num_block blocks per layer, the first block
+        # could be 1 or 2, other blocks would always be 1
+        print("make layer")
+        strides = [stride] + [1] * (num_blocks - 1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_channels, out_channels, stride))
+            self.in_channels = out_channels * block.expansion
+
+        return nn.Sequential(*layers)
 
     def forward(self, x):
-        x1 = self.conv_head(x)
-        x2 = self.rab(x1)
-        x2_1 = self.down(x2)
-        x3 = self.rab(x2_1)
-        x3_1 = self.down(x3)
-        x4 = self.rab(x3_1)
-        x4_1 = self.up(x4, x3)
-        x5 = self.rab(x4_1 + x3)
-        x5_1 = self.up(x5, x2)
-        x6 = self.rab(x5_1 + x2)
-        x7 = self.conv_tail(x6 + x1)
-        X = x - x7
-        x8 = self.avg_pool(X)
-        x9 = x8.view(x8.size(0), -1)
-        x10 = self.fc(x9)
+        output = self.conv1(x)
+        output = self.conv2_x(output)
+        output = self.conv3_x(output)
+        output = self.conv4_x(output)
+        output = self.conv5_x(output)
+        output = self.avg_pool(output)
+        output = output.view(output.size(0), -1)
+        print(output.size())
+        output = self.fc(output)
 
-        return x10
+        return output
+    
+def ranet18():
+    """ return a ResNet 18 object
+    """
+    return RANet(Residual_Attention_Block, [2, 2, 2, 2])
+
     
 if __name__ == "__main__":
 
     x = torch.randn(1, 3, 32, 32) # B C H W
 
-    model = RANet()
+    model = ranet18()
 
     output = model(x)
 
