@@ -158,6 +158,9 @@ def get_network(args):
     elif args.net == 'cprfnet':
         from models.cprfnet import CPRFNet
         net = CPRFNet()
+    elif args.net == 'ranet':
+        from models.ranet import ranet18
+        net = ranet18()
 
     else:
         print('the network name you have entered is not supported yet')
