@@ -153,7 +153,11 @@ class RANet(nn.Module):
         self.pa = PALayer(64 + 128 + 256 + 512)
 
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+        self.fc = nn.Linear((64 + 128 + 256 + 512) * block.expansion, num_classes)
+
+        self.up_3 = Up(128, True)
+        self.up_4 = Up(256, True)
+        self.up_5 = Up(512, True)
 
     def _make_layer(self, block, out_channels, num_blocks, stride):
         """make resnet layers(by layer i didnt mean this 'layer' was the
@@ -187,7 +191,15 @@ class RANet(nn.Module):
         x3 = self.conv3_x(x2)
         x4 = self.conv4_x(x3)
         x5 = self.conv5_x(x4)
-        output = self.ca(torch.cat([x2, x3, x4, x5], dim=1))
+
+        x3_up = self.up_3(x3, x2)
+        x4_up = self.up_4(x4, x2)
+        x5_up = self.up_5(x5, x2)
+        print(x2.size())
+        print(x3_up.size())
+        print(x4_up.size())
+        print(x5_up.size())
+        output = self.ca(torch.cat([x2, x3_up, x4_up, x5_up], dim=1))
         output = self.pa(output)
 
         output = self.avg_pool(output)
@@ -208,6 +220,8 @@ if __name__ == "__main__":
     x = torch.randn(1, 3, 32, 32) # B C H W
 
     model = ranet18()
+
+    print(model)
 
     output = model(x)
 

@@ -158,7 +158,7 @@ def get_network(args):
     elif args.net == 'cprfnet':
         from models.cprfnet import CPRFNet
         net = CPRFNet()
-    elif args.net == 'ranet':
+    elif args.net == 'ranet18':
         from models.ranet import ranet18
         net = ranet18()
 
