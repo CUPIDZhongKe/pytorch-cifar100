@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchinfo import summary
 
 class PALayer(nn.Module):
     def __init__(self, channel):
@@ -134,6 +135,38 @@ class Residual_Attention_Block(nn.Module):
     def forward(self, x):
         return nn.ReLU(inplace=True)(self.res(x) + self.shortcut(x))
     
+# FPN构建
+# fpn_list中包含以下特征维度,对应章节1.3中的图
+# C2 [2, 64, 64, 64]
+# C3 [2, 128, 32, 32]
+# C4 [2, 256, 16, 16]
+# C5 [2, 512, 8, 8]
+class FPN(nn.Module):
+    def __init__(self,in_channel_list,out_channel):
+        super().__init__()
+        self.inner_layer=[]  # 1x1卷积，统一通道数
+        self.out_layer=[]  # 3x3卷积，对add后的特征图进一步融合
+        for in_channel in in_channel_list:  
+            self.inner_layer.append(nn.Conv2d(in_channel,out_channel,1))
+            self.out_layer.append(nn.Conv2d(out_channel,out_channel,kernel_size=3,padding=1))
+    def forward(self,x):
+        head_output=[]  # 存放最终输出特征图
+        corent_inner=self.inner_layer[-1](x[-1])  # 过1x1卷积，对C5统一通道数操作
+        head_output.append(self.out_layer[-1](corent_inner)) # 过3x3卷积，对统一通道后过的特征进一步融合，加入head_output列表
+        print(self.out_layer[-1](corent_inner).shape)
+        
+        for i in range(len(x)-2,-1,-1):  # 通过for循环，对C4，C3，C2进行
+            pre_inner=corent_inner
+            corent_inner=self.inner_layer[i](x[i])  # 1x1卷积，统一通道数操作
+            size=corent_inner.shape[2:]  # 获取上采样的大小（size）
+            pre_top_down=F.interpolate(pre_inner,size=size)  # 上采样操作（这里大家去看一下interpolate这个上采样api）
+            add_pre2corent=pre_top_down+corent_inner  # add操作
+            head_output.append(self.out_layer[i](add_pre2corent))  # 3x3卷积，特征进一步融合操作，并加入head_output列表
+            print(self.out_layer[i](add_pre2corent).shape)
+        
+        return head_output
+
+    
 class RANet(nn.Module):
     def __init__(self, block, num_block, num_classes=100):
         super(RANet, self).__init__()
@@ -149,15 +182,15 @@ class RANet(nn.Module):
         self.conv4_x = self._make_layer(block, 256, num_block[2], 2)
         self.conv5_x = self._make_layer(block, 512, num_block[3], 2)
 
-        self.ca = CALayer(64 + 128 + 256 + 512)
-        self.pa = PALayer(64 + 128 + 256 + 512)
+        self.ca = CALayer(256 * 4)
+        self.pa = PALayer(256 * 4)
 
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear((64 + 128 + 256 + 512) * block.expansion, num_classes)
+        self.fc = nn.Linear(256 * 4 * block.expansion, num_classes)
 
-        self.up_3 = Up(128, True)
-        self.up_4 = Up(256, True)
-        self.up_5 = Up(512, True)
+        self.up = Up(256, True)
+
+        self.fpn = FPN([64,128,256,512], 256)
 
     def _make_layer(self, block, out_channels, num_blocks, stride):
         """make resnet layers(by layer i didnt mean this 'layer' was the
@@ -176,7 +209,6 @@ class RANet(nn.Module):
 
         # we have num_block blocks per layer, the first block
         # could be 1 or 2, other blocks would always be 1
-        print("make layer")
         strides = [stride] + [1] * (num_blocks - 1)
         layers = []
         for stride in strides:
@@ -186,19 +218,26 @@ class RANet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        FPN_list = []
+
         x1 = self.conv1(x)
         x2 = self.conv2_x(x1)
         x3 = self.conv3_x(x2)
         x4 = self.conv4_x(x3)
         x5 = self.conv5_x(x4)
 
-        x3_up = self.up_3(x3, x2)
-        x4_up = self.up_4(x4, x2)
-        x5_up = self.up_5(x5, x2)
-        print(x2.size())
-        print(x3_up.size())
-        print(x4_up.size())
-        print(x5_up.size())
+        FPN_list.append(x2)
+        FPN_list.append(x3)
+        FPN_list.append(x4)
+        FPN_list.append(x5)
+
+        fpn_output = self.fpn(FPN_list)
+
+        x2 = fpn_output[0]
+        x3_up = self.up(fpn_output[1], fpn_output[0])
+        x4_up = self.up(fpn_output[2], fpn_output[0])
+        x5_up = self.up(fpn_output[3], fpn_output[0])
+
         output = self.ca(torch.cat([x2, x3_up, x4_up, x5_up], dim=1))
         output = self.pa(output)
 
@@ -221,7 +260,7 @@ if __name__ == "__main__":
 
     model = ranet18()
 
-    print(model)
+    # summary(model, input_size=(1, 3, 32, 32))
 
     output = model(x)
 
