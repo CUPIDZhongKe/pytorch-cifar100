@@ -133,20 +133,7 @@ class Residual_Attention_Block(nn.Module):
                 nn.BatchNorm2d(out_channels * Residual_Attention_Block.expansion)
             )
     def forward(self, x):
-        print("basic conv1 ", self.res[0].in_channels, self.res[0].out_channels)
-        print(x.size())
-        x = self.res[0](x)
-        x = self.res[1](x)
-        x = self.res[2](x)
-        print("basic conv2 ", self.res[3].in_channels, self.res[3].out_channels)
-        print(x.size())
-        x = self.res[3](x)
-        x = self.res[4](x)
-        x = self.res[5](x)
-        x = self.res[6](x)
-        return x
-
-        # return nn.ReLU(inplace=True)(self.res(x) + self.shortcut(x))
+        return nn.ReLU(inplace=True)(self.res(x) + self.shortcut(x))
     
 # FPN构建
 # fpn_list中包含以下特征维度,对应章节1.3中的图

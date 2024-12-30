@@ -20,9 +20,67 @@ model_urls = {
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
 
+class PALayer(nn.Module):
+    def __init__(self, channel):
+        super(PALayer, self).__init__()
+        self.pa = nn.Sequential(
+            nn.Conv2d(channel, channel // 8, 1, padding=0, bias=True),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channel // 8, 1, 1, padding=0, bias=True),
+            nn.Sigmoid()
+        )
+    def forward(self, x):
+        y = self.pa(x)
+        return x * y
 
-def conv3x3(inplanes, planes, stride=1):
-    return nn.Conv2d(inplanes, planes, stride=stride, kernel_size=3, padding=1, bias=False)
+
+
+class CALayer(nn.Module):
+    def __init__(self, channel):
+        super(CALayer, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.ca = nn.Sequential(
+            nn.Conv2d(channel, channel // 8, 1, padding=0, bias=True),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channel // 8, channel, 1, padding=0, bias=True),
+            nn.Sigmoid()
+        )
+    def forward(self, x):
+        y = self.avg_pool(x)
+        y = self.ca(y)
+        return x * y
+
+class Residual_Attention_Block(nn.Module):
+
+    expansion = 1   #the expansion of Residual Block
+
+    def __init__(self, in_channels=64, out_channels=64, stride=1):
+        super().__init__()
+
+        #residual function
+        self.res = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels * Residual_Attention_Block.expansion, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels * Residual_Attention_Block.expansion),
+            CALayer(out_channels),
+            PALayer(out_channels)
+        )
+
+        #shortcut
+        self.shortcut = nn.Sequential()
+
+        #the shortcut output dimension is not the same with residual function
+        #use 1*1 convolution to match the dimension
+        if stride != 1 or in_channels != Residual_Attention_Block.expansion * out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels * Residual_Attention_Block.expansion, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_channels * Residual_Attention_Block.expansion)
+            )
+    def forward(self, x):
+        return nn.ReLU(inplace=True)(self.res(x) + self.shortcut(x))
+
 
 class BasicBlock(nn.Module):
     """Basic Block for resnet 18 and resnet 34
@@ -254,7 +312,7 @@ def resnet18(pretrained=False, **kwargs):
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
-    model = ResNet(BasicBlock, [2, 2, 2, 2], **kwargs)
+    model = ResNet(Residual_Attention_Block, [2, 2, 2, 2], **kwargs)
     if pretrained:
         pretrained_model = model_zoo.load_url(model_urls['resnet50'])
         state = model.state_dict()
@@ -266,8 +324,8 @@ def resnet18(pretrained=False, **kwargs):
 
 if __name__ == '__main__':
     net = resnet18()
-    # x = torch.randn(1, 3, 64, 64)
-    # y = net(x)
-    # print(y.size())
+    x = torch.randn(1, 3, 64, 64)
+    y = net(x)
+    print(y.size())
 
     summary(net, input_size=(1, 3, 32, 32))
