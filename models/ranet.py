@@ -182,11 +182,11 @@ class RANet(nn.Module):
         self.conv4_x = self._make_layer(block, 256, num_block[2], 2)
         self.conv5_x = self._make_layer(block, 512, num_block[3], 2)
 
-        self.ca = CALayer(256 * 4)
-        self.pa = PALayer(256 * 4)
+        self.ca = CALayer(256)
+        self.pa = PALayer(256)
 
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(256 * 4 * block.expansion, num_classes)
+        self.fc = nn.Linear(256 * block.expansion, num_classes)
 
         self.up = Up(256, True)
 
@@ -233,12 +233,17 @@ class RANet(nn.Module):
 
         fpn_output = self.fpn(FPN_list)
 
-        x2 = fpn_output[0]
-        x3_up = self.up(fpn_output[1], fpn_output[0])
-        x4_up = self.up(fpn_output[2], fpn_output[0])
-        x5_up = self.up(fpn_output[3], fpn_output[0])
+        # 上采样FPN输出
+        # x2 = fpn_output[0]
+        # x3_up = self.up(fpn_output[1], fpn_output[0])
+        # x4_up = self.up(fpn_output[2], fpn_output[0])
+        # x5_up = self.up(fpn_output[3], fpn_output[0])
 
-        output = self.ca(torch.cat([x2, x3_up, x4_up, x5_up], dim=1))
+        # output = self.ca(torch.cat([x2, x3_up, x4_up, x5_up], dim=1))
+        # output = self.pa(output)
+
+        # 使用FPN最底层特征图作为多尺度融合输出
+        output = self.ca(fpn_output[0])
         output = self.pa(output)
 
         output = self.avg_pool(output)
