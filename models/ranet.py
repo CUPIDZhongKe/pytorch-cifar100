@@ -153,7 +153,7 @@ class FPN(nn.Module):
         head_output=[]  # 存放最终输出特征图
         corent_inner=self.inner_layer[-1](x[-1])  # 过1x1卷积，对C5统一通道数操作
         head_output.append(self.out_layer[-1](corent_inner)) # 过3x3卷积，对统一通道后过的特征进一步融合，加入head_output列表
-        print(self.out_layer[-1](corent_inner).shape)
+        self.out_layer[-1](corent_inner)
         
         for i in range(len(x)-2,-1,-1):  # 通过for循环，对C4，C3，C2进行
             pre_inner=corent_inner
@@ -162,7 +162,7 @@ class FPN(nn.Module):
             pre_top_down=F.interpolate(pre_inner,size=size)  # 上采样操作（这里大家去看一下interpolate这个上采样api）
             add_pre2corent=pre_top_down+corent_inner  # add操作
             head_output.append(self.out_layer[i](add_pre2corent))  # 3x3卷积，特征进一步融合操作，并加入head_output列表
-            print(self.out_layer[i](add_pre2corent).shape)
+            self.out_layer[i](add_pre2corent)
         
         return head_output
 
@@ -243,13 +243,15 @@ class RANet(nn.Module):
         # output = self.pa(output)
 
         # 使用FPN最底层特征图作为多尺度融合输出
-        output = self.ca(fpn_output[0])
+        output = self.ca(fpn_output[3])
         output = self.pa(output)
+
+        print(output.size())
 
         output = self.avg_pool(output)
         output = output.view(output.size(0), -1)
-        print(output.size())
         output = self.fc(output)
+
 
         return output
     
