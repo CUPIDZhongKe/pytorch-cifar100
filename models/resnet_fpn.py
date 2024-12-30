@@ -9,6 +9,9 @@ import torch.utils.model_zoo as model_zoo
 import math
 import torch.nn.functional as F
 
+from torchinfo import summary
+
+
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
     'resnet34': 'https://download.pytorch.org/models/resnet34-333f7ec4.pth',
@@ -200,7 +203,6 @@ class ResNet(nn.Module):
         h = self.conv1(h)
         h = self.bn1(h)
         h = self.relu1(h)
-        print(h.size())
 
         h = self.layer1(h)
         c2 = h
@@ -238,7 +240,6 @@ class ResNet(nn.Module):
         p5 = self._upsample(p5, p2)
 
         out = torch.cat((p2, p3, p4, p5), 1)
-        print(out.size())
         out = self.conv2(out)
         out = self.relu2(self.bn2(out))
         out = self.avg_pool(out)
@@ -265,6 +266,8 @@ def resnet18(pretrained=False, **kwargs):
 
 if __name__ == '__main__':
     net = resnet18()
-    x = torch.randn(1, 3, 64, 64)
-    y = net(x)
-    print(y.size())
+    # x = torch.randn(1, 3, 64, 64)
+    # y = net(x)
+    # print(y.size())
+
+    summary(net, input_size=(1, 3, 32, 32))
