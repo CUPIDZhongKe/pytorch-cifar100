@@ -133,7 +133,20 @@ class Residual_Attention_Block(nn.Module):
                 nn.BatchNorm2d(out_channels * Residual_Attention_Block.expansion)
             )
     def forward(self, x):
-        return nn.ReLU(inplace=True)(self.res(x) + self.shortcut(x))
+        print("basic conv1 ", self.res[0].in_channels, self.res[0].out_channels)
+        print(x.size())
+        x = self.res[0](x)
+        x = self.res[1](x)
+        x = self.res[2](x)
+        print("basic conv2 ", self.res[3].in_channels, self.res[3].out_channels)
+        print(x.size())
+        x = self.res[3](x)
+        x = self.res[4](x)
+        x = self.res[5](x)
+        x = self.res[6](x)
+        return x
+
+        # return nn.ReLU(inplace=True)(self.res(x) + self.shortcut(x))
     
 # FPN构建
 # fpn_list中包含以下特征维度,对应章节1.3中的图
@@ -153,7 +166,7 @@ class FPN(nn.Module):
         head_output=[]  # 存放最终输出特征图
         corent_inner=self.inner_layer[-1](x[-1])  # 过1x1卷积，对C5统一通道数操作
         head_output.append(self.out_layer[-1](corent_inner)) # 过3x3卷积，对统一通道后过的特征进一步融合，加入head_output列表
-        self.out_layer[-1](corent_inner)
+        # print(self.out_layer[-1](corent_inner).shape)
         
         for i in range(len(x)-2,-1,-1):  # 通过for循环，对C4，C3，C2进行
             pre_inner=corent_inner
@@ -162,7 +175,7 @@ class FPN(nn.Module):
             pre_top_down=F.interpolate(pre_inner,size=size)  # 上采样操作（这里大家去看一下interpolate这个上采样api）
             add_pre2corent=pre_top_down+corent_inner  # add操作
             head_output.append(self.out_layer[i](add_pre2corent))  # 3x3卷积，特征进一步融合操作，并加入head_output列表
-            self.out_layer[i](add_pre2corent)
+            # print(self.out_layer[i](add_pre2corent).shape)
         
         return head_output
 
@@ -219,10 +232,13 @@ class RANet(nn.Module):
 
     def forward(self, x):
         FPN_list = []
-
+        print(x.size())
         x1 = self.conv1(x)
+        print("layer1 ", x1.shape)
         x2 = self.conv2_x(x1)
+        print("layer2 ", x2.shape)
         x3 = self.conv3_x(x2)
+        print("layer3 ", x3.shape)
         x4 = self.conv4_x(x3)
         x5 = self.conv5_x(x4)
 
@@ -246,12 +262,9 @@ class RANet(nn.Module):
         output = self.ca(fpn_output[3])
         output = self.pa(output)
 
-        print(output.size())
-
         output = self.avg_pool(output)
         output = output.view(output.size(0), -1)
         output = self.fc(output)
-
 
         return output
     
@@ -263,7 +276,7 @@ def ranet18():
     
 if __name__ == "__main__":
 
-    x = torch.randn(1, 3, 32, 32) # B C H W
+    x = torch.randn(1, 3, 64, 64) # B C H W
 
     model = ranet18()
 
@@ -271,5 +284,5 @@ if __name__ == "__main__":
 
     output = model(x)
 
-    print(x.size())
-    print(output.size())
+    # print(x.size())
+    # print(output.size())
