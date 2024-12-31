@@ -10,6 +10,7 @@ import datetime
 import numpy
 
 import torch
+import torch.nn as nn
 from torch.optim.lr_scheduler import _LRScheduler
 import torchvision
 import torchvision.transforms as transforms
@@ -170,6 +171,11 @@ def get_network(args):
         sys.exit()
 
     if args.gpu: #use_gpu
+        # 检查是否有多个 GPU
+        if torch.cuda.device_count() > 1:
+            print("Let's use", torch.cuda.device_count(), "GPUs!")
+            # 使用 DataParallel 包装模型
+            net = nn.DataParallel(net)
         net = net.cuda()
 
     return net

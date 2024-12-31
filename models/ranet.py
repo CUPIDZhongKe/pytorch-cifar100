@@ -182,15 +182,11 @@ class RANet(nn.Module):
         self.conv4_x = self._make_layer(block, 256, num_block[2], 2)
         self.conv5_x = self._make_layer(block, 512, num_block[3], 2)
 
-        self.ca = CALayer(256)
-        self.pa = PALayer(256)
+        self.ca = CALayer(512)
+        self.pa = PALayer(512)
 
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(256 * block.expansion, num_classes)
-
-        self.up = Up(256, True)
-
-        self.fpn = FPN([64,128,256,512], 256)
+        self.fc = nn.Linear(512 * block.expansion, num_classes)
 
     def _make_layer(self, block, out_channels, num_blocks, stride):
         """make resnet layers(by layer i didnt mean this 'layer' was the
@@ -218,35 +214,13 @@ class RANet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        FPN_list = []
-        print(x.size())
         x1 = self.conv1(x)
-        print("layer1 ", x1.shape)
         x2 = self.conv2_x(x1)
-        print("layer2 ", x2.shape)
         x3 = self.conv3_x(x2)
-        print("layer3 ", x3.shape)
         x4 = self.conv4_x(x3)
         x5 = self.conv5_x(x4)
 
-        FPN_list.append(x2)
-        FPN_list.append(x3)
-        FPN_list.append(x4)
-        FPN_list.append(x5)
-
-        fpn_output = self.fpn(FPN_list)
-
-        # 上采样FPN输出
-        # x2 = fpn_output[0]
-        # x3_up = self.up(fpn_output[1], fpn_output[0])
-        # x4_up = self.up(fpn_output[2], fpn_output[0])
-        # x5_up = self.up(fpn_output[3], fpn_output[0])
-
-        # output = self.ca(torch.cat([x2, x3_up, x4_up, x5_up], dim=1))
-        # output = self.pa(output)
-
-        # 使用FPN最底层特征图作为多尺度融合输出
-        output = self.ca(fpn_output[3])
+        output = self.ca(x5)
         output = self.pa(output)
 
         output = self.avg_pool(output)
@@ -271,5 +245,5 @@ if __name__ == "__main__":
 
     output = model(x)
 
-    # print(x.size())
-    # print(output.size())
+    print(x.size())
+    print(output.size())
