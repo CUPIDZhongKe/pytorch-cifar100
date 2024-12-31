@@ -220,7 +220,7 @@ class RANet(nn.Module):
         x4 = self.conv4_x(x3)
         x5 = self.conv5_x(x4)
 
-        # output = self.ca(x5)
+        output = self.ca(x5)
         # output = self.pa(output)
 
         output = self.avg_pool(x5)

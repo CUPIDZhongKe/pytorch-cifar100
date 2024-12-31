@@ -9,7 +9,7 @@ import torch.utils.model_zoo as model_zoo
 import math
 import torch.nn.functional as F
 
-from torchinfo import summary
+# from torchinfo import summary
 
 
 model_urls = {
@@ -304,6 +304,9 @@ class ResNet(nn.Module):
         out = self.conv2(out)
         out = self.relu2(self.bn2(out))
 
+        # out = self.ca(p2)
+        out = self.pa(out)
+
         out = self.avg_pool(out)
         out = out.view(out.size(0), -1)
         out = self.fc(out)
@@ -317,13 +320,13 @@ def ranet18_fpn(pretrained=False, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
     model = ResNet(Residual_Attention_Block, [2, 2, 2, 2], **kwargs)
-    if pretrained:
-        pretrained_model = model_zoo.load_url(model_urls['resnet50'])
-        state = model.state_dict()
-        for key in state.keys():
-            if key in pretrained_model.keys():
-                state[key] = pretrained_model[key]
-        model.load_state_dict(state)
+    # if pretrained:
+    #     pretrained_model = model_zoo.load_url(model_urls['resnet18'])
+    #     state = model.state_dict()
+    #     for key in state.keys():
+    #         if key in pretrained_model.keys():
+    #             state[key] = pretrained_model[key]
+    #     model.load_state_dict(state)
     return model
 
 if __name__ == '__main__':
@@ -332,4 +335,4 @@ if __name__ == '__main__':
     y = net(x)
     print(y.size())
 
-    summary(net, input_size=(1, 3, 32, 32))
+    # summary(net, input_size=(1, 3, 64, 64))
