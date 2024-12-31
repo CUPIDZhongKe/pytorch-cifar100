@@ -213,10 +213,10 @@ class ResNet(nn.Module):
         self.scale = scale
         
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(256 * 4 * block.expansion, num_classes)
+        self.fc = nn.Linear(256 * block.expansion, num_classes)
 
-        self.ca = CALayer(256 * 4)
-        self.pa = PALayer(256 * 4)
+        self.ca = CALayer(256)
+        self.pa = PALayer(256)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -296,12 +296,12 @@ class ResNet(nn.Module):
         p2 = self.smooth3(p2)
         p2 = self.smooth3_relu(self.smooth3_bn(p2))
 
-        p3 = self._upsample(p3, p2)
-        p4 = self._upsample(p4, p2)
-        p5 = self._upsample(p5, p2)
+        # p3 = self._upsample(p3, p2)
+        # p4 = self._upsample(p4, p2)
+        # p5 = self._upsample(p5, p2)
 
-        out = torch.cat((p2, p3, p4, p5), 1)
-        out = self.ca(out)
+        # out = torch.cat((p2, p3, p4, p5), 1)
+        out = self.ca(p2)
         out = self.pa(out)
 
         # out = self.conv2(out)
