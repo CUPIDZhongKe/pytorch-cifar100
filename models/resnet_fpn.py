@@ -162,6 +162,8 @@ class ResNet(nn.Module):
 
     def __init__(self, block, layers, num_classes=100, scale=1):
         self.in_channels = 64
+        self.num_classes = num_classes
+
         super(ResNet, self).__init__()
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1,
                                bias=False)
@@ -264,6 +266,7 @@ class ResNet(nn.Module):
         h = self.conv1(h)
         h = self.bn1(h)
         h = self.relu1(h)
+        h = F.max_pool2d(h, kernel_size=3, stride=2, padding=1)
 
         h = self.layer1(h)
         c2 = h
@@ -300,12 +303,23 @@ class ResNet(nn.Module):
         p4 = self._upsample(p4, p2)
         p5 = self._upsample(p5, p2)
 
+        # # 假设每个特征层有一个 learnable 权重
+        # weights = nn.Parameter(torch.ones(4))
+
+        # # 权重归一化
+        # normalized_weights = F.softmax(weights, dim=0)
+
+        # # 加权融合
+        # fpn_outputs = [p2, p3, p4, p5]
+        # weighted_features = sum(w * nn.AdaptiveAvgPool2d(1)(f).view(f.size(0), -1) for w, f in zip(normalized_weights, fpn_outputs))
+
+
         out = torch.cat((p2, p3, p4, p5), 1)
         out = self.conv2(out)
         out = self.relu2(self.bn2(out))
 
         # out = self.ca(p2)
-        out = self.pa(out)
+        # out = self.pa(out)
 
         out = self.avg_pool(out)
         out = out.view(out.size(0), -1)
