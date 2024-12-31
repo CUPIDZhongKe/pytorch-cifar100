@@ -301,19 +301,17 @@ class ResNet(nn.Module):
         # p5 = self._upsample(p5, p2)
 
         # out = torch.cat((p2, p3, p4, p5), 1)
-        out = self.ca(p2)
-        out = self.pa(out)
 
         # out = self.conv2(out)
         # out = self.relu2(self.bn2(out))
-        out = self.avg_pool(out)
+        out = self.avg_pool(p2)
         out = out.view(out.size(0), -1)
         out = self.fc(out)
 
         return out
 
-def resnet18(pretrained=False, **kwargs):
-    """Constructs a ResNet-18 model.
+def ranet18_fpn(pretrained=False, **kwargs):
+    """Constructs a RANet-18-FPN model.
 
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
@@ -329,7 +327,7 @@ def resnet18(pretrained=False, **kwargs):
     return model
 
 if __name__ == '__main__':
-    net = resnet18()
+    net = ranet18_fpn()
     x = torch.randn(1, 3, 64, 64)
     y = net(x)
     print(y.size())
