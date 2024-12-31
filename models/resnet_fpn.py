@@ -296,15 +296,15 @@ class ResNet(nn.Module):
         p2 = self.smooth3(p2)
         p2 = self.smooth3_relu(self.smooth3_bn(p2))
 
-        # p3 = self._upsample(p3, p2)
-        # p4 = self._upsample(p4, p2)
-        # p5 = self._upsample(p5, p2)
+        p3 = self._upsample(p3, p2)
+        p4 = self._upsample(p4, p2)
+        p5 = self._upsample(p5, p2)
 
-        # out = torch.cat((p2, p3, p4, p5), 1)
+        out = torch.cat((p2, p3, p4, p5), 1)
+        out = self.conv2(out)
+        out = self.relu2(self.bn2(out))
 
-        # out = self.conv2(out)
-        # out = self.relu2(self.bn2(out))
-        out = self.avg_pool(p2)
+        out = self.avg_pool(out)
         out = out.view(out.size(0), -1)
         out = self.fc(out)
 
