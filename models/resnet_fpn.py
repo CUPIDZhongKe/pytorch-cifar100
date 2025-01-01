@@ -303,27 +303,24 @@ class ResNet(nn.Module):
         p4 = self._upsample(p4, p2)
         p5 = self._upsample(p5, p2)
 
-        # # 假设每个特征层有一个 learnable 权重
-        # weights = nn.Parameter(torch.ones(4))
+        # 加权融合
+        weights = nn.Parameter(torch.ones(4))
+        normalized_weights = F.softmax(weights, dim=0)
+        fpn_outputs = [p2, p3, p4, p5]
+        weighted_features = sum(w * nn.AdaptiveAvgPool2d(1)(f).view(f.size(0), -1) for w, f in zip(normalized_weights, fpn_outputs))
+        out = self.fc(weighted_features)
 
-        # # 权重归一化
-        # normalized_weights = F.softmax(weights, dim=0)
-
-        # # 加权融合
-        # fpn_outputs = [p2, p3, p4, p5]
-        # weighted_features = sum(w * nn.AdaptiveAvgPool2d(1)(f).view(f.size(0), -1) for w, f in zip(normalized_weights, fpn_outputs))
-
-
-        out = torch.cat((p2, p3, p4, p5), 1)
-        out = self.conv2(out)
-        out = self.relu2(self.bn2(out))
+        # 拼接特征方式
+        # out = torch.cat((p2, p3, p4, p5), 1)
+        # out = self.conv2(out)
+        # out = self.relu2(self.bn2(out))
 
         # out = self.ca(p2)
         # out = self.pa(out)
 
-        out = self.avg_pool(out)
-        out = out.view(out.size(0), -1)
-        out = self.fc(out)
+        # out = self.avg_pool(p2)
+        # out = out.view(out.size(0), -1)
+        # out = self.fc(out)
 
         return out
 
