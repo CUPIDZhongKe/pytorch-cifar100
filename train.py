@@ -148,8 +148,21 @@ if __name__ == '__main__':
     # )
 
     mean, std = calculate_mean_std(os.path.join(args.datadir, 'train'))
-    training_loader = get_training_dataloader(args.datadir, mean, std)
-    test_loader = get_test_dataloader(args.datadir, mean, std)
+    training_loader = get_training_dataloader(
+        args.datadir, 
+        mean, 
+        std, 
+        num_workers=4, 
+        batch_size=args.b,
+        shuffle=True)
+    
+    test_loader = get_test_dataloader(        
+        args.datadir, 
+        mean, 
+        std, 
+        num_workers=4, 
+        batch_size=args.b,
+        shuffle=True)
 
     loss_function = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
