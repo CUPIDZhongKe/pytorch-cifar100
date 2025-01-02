@@ -15,7 +15,8 @@ from torch.optim.lr_scheduler import _LRScheduler
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
-
+from torchvision.datasets import ImageFolder
+from conf import settings
 
 def get_network(args):
     """ return given network
@@ -208,6 +209,7 @@ def get_training_dataloader(mean, std, batch_size=16, num_workers=2, shuffle=Tru
 
     return cifar100_training_loader
 
+
 def get_test_dataloader(mean, std, batch_size=16, num_workers=2, shuffle=True):
     """ return training dataloader
     Args:
@@ -230,6 +232,75 @@ def get_test_dataloader(mean, std, batch_size=16, num_workers=2, shuffle=True):
         cifar100_test, shuffle=shuffle, num_workers=num_workers, batch_size=batch_size)
 
     return cifar100_test_loader
+
+def get_train_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, shuffle=True):
+    """ return training dataloader
+    Args:
+        data_dir: path to training dataset
+        mean: mean of training dataset
+        std: std of training dataset
+        batch_size: dataloader batchsize
+        num_workers: dataloader num_works
+        shuffle: whether to shuffle
+    Returns: train_loader: torch dataloader object
+    """
+    transform_train = transforms.Compose([
+        transforms.Resize((224, 224)),  # 调整图像大小为 224x224
+        transforms.RandomCrop(224, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std)
+    ])
+    train_dataset = ImageFolder(root=os.path.join(data_dir, 'train'), transform=transform_train)
+    train_loader = DataLoader(train_dataset, shuffle=shuffle, num_workers=num_workers, batch_size=batch_size)
+    return train_loader
+
+def get_test_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, shuffle=True):
+    """ return test dataloader
+    Args:
+        data_dir: path to test dataset
+        mean: mean of test dataset
+        std: std of test dataset
+        batch_size: dataloader batchsize
+        num_workers: dataloader num_works
+        shuffle: whether to shuffle
+    Returns: test_loader: torch dataloader object
+    """
+    transform_test = transforms.Compose([
+        transforms.Resize((224, 224)),  # 调整图像大小为 224x224
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std)
+    ])
+    test_dataset = ImageFolder(root=os.path.join(data_dir, 'test'), transform=transform_test)
+    test_loader = DataLoader(test_dataset, shuffle=shuffle, num_workers=num_workers, batch_size=batch_size)
+    return test_loader
+
+def calculate_mean_std(data_dir):
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),  # 调整图像大小为 224x224
+        transforms.ToTensor()
+    ])
+    
+    dataset = ImageFolder(root=data_dir, transform=transform)
+    loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=2)
+
+    mean = 0.0
+    std = 0.0
+    nb_samples = 0
+
+    for data, _ in loader:
+        batch_samples = data.size(0)
+        data = data.view(batch_samples, data.size(1), -1)
+        mean += data.mean(2).sum(0)
+        std += data.std(2).sum(0)
+        nb_samples += batch_samples
+
+    mean /= nb_samples
+    std /= nb_samples
+
+    print(f'Mean: {mean}')
+    print(f'Std: {std}')
+    return mean, std
 
 def compute_mean_std(cifar100_dataset):
     """compute the mean and std of cifar100 dataset
@@ -324,3 +395,30 @@ def best_acc_weights(weights_folder):
 
     best_files = sorted(best_files, key=lambda w: int(re.search(regex_str, w).groups()[1]))
     return best_files[-1]
+
+
+if __name__ == "__main__":
+    # data_dir = r'F:\datasets\docDataset_oneside_vis'
+    # mean, std = calculate_mean_std(os.path.join(data_dir, 'train'))
+    # train_loader = get_train_dataloader(data_dir, mean, std)
+    # test_loader = get_test_dataloader(data_dir, mean, std)
+    #data preprocessing:
+    cifar100_training_loader = get_training_dataloader(
+        settings.CIFAR100_TRAIN_MEAN,
+        settings.CIFAR100_TRAIN_STD,
+        num_workers=4,
+        batch_size=128,
+        shuffle=True
+    )
+
+    cifar100_test_loader = get_test_dataloader(
+        settings.CIFAR100_TRAIN_MEAN,
+        settings.CIFAR100_TRAIN_STD,
+        num_workers=4,
+        batch_size=128,
+        shuffle=True
+    )
+    # 示例：遍历训练数据
+    for batch_index, (images, labels) in enumerate(cifar100_training_loader):
+        print(batch_index, images.shape, labels.shape)
+        break
