@@ -233,7 +233,7 @@ def get_network(args):
 
 #     return cifar100_test_loader
 
-def get_training_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, shuffle=True):
+def get_training_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, shuffle=True, pin_memory=True):
     """ return training dataloader
     Args:
         data_dir: path to training dataset
@@ -245,17 +245,17 @@ def get_training_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, s
     Returns: train_loader: torch dataloader object
     """
     transform_train = transforms.Compose([
-        transforms.Resize((224, 224)),  # 调整图像大小为 224x224
-        transforms.RandomCrop(224, padding=4),
+        transforms.Resize((64, 64)),  # 调整图像大小为 224x224
+        transforms.RandomCrop(64, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(mean, std)
     ])
     train_dataset = ImageFolder(root=os.path.join(data_dir, 'train'), transform=transform_train)
-    train_loader = DataLoader(train_dataset, shuffle=shuffle, num_workers=num_workers, batch_size=batch_size)
+    train_loader = DataLoader(train_dataset, shuffle=shuffle, num_workers=num_workers, batch_size=batch_size, pin_memory=pin_memory)
     return train_loader
 
-def get_test_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, shuffle=True):
+def get_test_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, shuffle=True, pin_memory=True):
     """ return test dataloader
     Args:
         data_dir: path to test dataset
@@ -267,17 +267,17 @@ def get_test_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, shuff
     Returns: test_loader: torch dataloader object
     """
     transform_test = transforms.Compose([
-        transforms.Resize((224, 224)),  # 调整图像大小为 224x224
+        transforms.Resize((64, 64)),  # 调整图像大小为 224x224
         transforms.ToTensor(),
         transforms.Normalize(mean, std)
     ])
     test_dataset = ImageFolder(root=os.path.join(data_dir, 'test'), transform=transform_test)
-    test_loader = DataLoader(test_dataset, shuffle=shuffle, num_workers=num_workers, batch_size=batch_size)
+    test_loader = DataLoader(test_dataset, shuffle=shuffle, num_workers=num_workers, batch_size=batch_size, pin_memory=pin_memory)
     return test_loader
 
 def calculate_mean_std(data_dir):
     transform = transforms.Compose([
-        transforms.Resize((224, 224)),  # 调整图像大小为 224x224
+        transforms.Resize((64, 64)),  # 调整图像大小为 224x224
         transforms.ToTensor()
     ])
     

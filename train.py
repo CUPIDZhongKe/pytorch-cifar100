@@ -128,14 +128,7 @@ if __name__ == '__main__':
     parser.add_argument('-datadir', type=str, default='./data', help='dataset')
     args = parser.parse_args()
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     net = get_network(args)
-
-    # 使用 DataParallel 包装模型
-    if torch.cuda.device_count() > 1:
-        print(f"Using {torch.cuda.device_count()} GPUs")
-        net = nn.DataParallel(net)
-    net = net.cuda()
 
     #data preprocessing:
     # cifar100_training_loader = get_training_dataloader(
