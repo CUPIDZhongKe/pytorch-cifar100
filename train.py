@@ -55,7 +55,7 @@ def train(epoch):
             loss.item(),
             optimizer.param_groups[0]['lr'],
             epoch=epoch,
-            trained_samples=batch_index * args.b + len(images),
+            trained_samples=batch_index * args.batch_size + len(images),
             total_samples=len(training_loader.dataset)
         ))
 
@@ -121,14 +121,21 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-net', type=str, required=True, help='net type')
     parser.add_argument('-gpu', action='store_true', default=False, help='use gpu or not')
-    parser.add_argument('-batch_size', type=int, default=64, help='batch size for dataloader')
+    parser.add_argument('-batch_size', type=int, default=128, help='batch size for dataloader')
     parser.add_argument('-warm', type=int, default=1, help='warm up training phase')
     parser.add_argument('-lr', type=float, default=0.1, help='initial learning rate')
     parser.add_argument('-resume', action='store_true', default=False, help='resume training')
     parser.add_argument('-datadir', type=str, default='./data', help='dataset')
     args = parser.parse_args()
 
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     net = get_network(args)
+
+    # 使用 DataParallel 包装模型
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs")
+        net = nn.DataParallel(net)
+    net = net.cuda()
 
     #data preprocessing:
     # cifar100_training_loader = get_training_dataloader(
@@ -152,16 +159,16 @@ if __name__ == '__main__':
         args.datadir, 
         mean, 
         std, 
-        num_workers=4, 
-        batch_size=args.b,
+        num_workers=8, 
+        batch_size=args.batch_size,
         shuffle=True)
     
     test_loader = get_test_dataloader(        
         args.datadir, 
         mean, 
         std, 
-        num_workers=4, 
-        batch_size=args.b,
+        num_workers=8, 
+        batch_size=args.batch_size,
         shuffle=True)
 
     loss_function = nn.CrossEntropyLoss()
