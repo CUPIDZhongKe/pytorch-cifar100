@@ -161,7 +161,9 @@ if __name__ == '__main__':
         std, 
         num_workers=8, 
         batch_size=args.batch_size,
-        shuffle=True)
+        shuffle=True,
+        pin_memory=True
+        )
     
     test_loader = get_test_dataloader(        
         args.datadir, 
@@ -169,7 +171,9 @@ if __name__ == '__main__':
         std, 
         num_workers=8, 
         batch_size=args.batch_size,
-        shuffle=True)
+        shuffle=True,
+        pin_memory=True
+        )
 
     loss_function = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
