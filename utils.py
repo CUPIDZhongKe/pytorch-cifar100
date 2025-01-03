@@ -166,7 +166,9 @@ def get_network(args):
     elif args.net == 'ranet18-fpn':
         from models.resnet_fpn import ranet18_fpn
         net = ranet18_fpn()
-
+    elif args.net == 'resnet18-fpn':
+        from models.resnet_fpn import resnet18_fpn
+        net = resnet18_fpn()
     else:
         print('the network name you have entered is not supported yet')
         sys.exit()

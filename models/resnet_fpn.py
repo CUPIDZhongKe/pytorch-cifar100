@@ -340,6 +340,22 @@ def ranet18_fpn(pretrained=False, **kwargs):
     #     model.load_state_dict(state)
     return model
 
+def resnet18_fpn(pretrained=False, **kwargs):
+    """Constructs a RANet-18-FPN model.
+
+    Args:
+        pretrained (bool): If True, returns a model pre-trained on ImageNet
+    """
+    model = ResNet(BasicBlock, [2, 2, 2, 2], **kwargs)
+    # if pretrained:
+    #     pretrained_model = model_zoo.load_url(model_urls['resnet18'])
+    #     state = model.state_dict()
+    #     for key in state.keys():
+    #         if key in pretrained_model.keys():
+    #             state[key] = pretrained_model[key]
+    #     model.load_state_dict(state)
+    return model
+
 if __name__ == '__main__':
     net = ranet18_fpn()
     x = torch.randn(1, 3, 64, 64)
