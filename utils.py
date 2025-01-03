@@ -246,8 +246,8 @@ def get_training_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, s
     Returns: train_loader: torch dataloader object
     """
     transform_train = transforms.Compose([
-        transforms.Resize((64, 64)),  # 调整图像大小为 224x224
-        transforms.RandomCrop(64, padding=4),
+        transforms.Resize((256, 256)),  # 调整图像大小为 224x224
+        transforms.RandomCrop(256, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(mean, std)
@@ -268,7 +268,7 @@ def get_test_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, shuff
     Returns: test_loader: torch dataloader object
     """
     transform_test = transforms.Compose([
-        transforms.Resize((64, 64)),  # 调整图像大小为 224x224
+        transforms.Resize((256, 256)),  # 调整图像大小为 224x224
         transforms.ToTensor(),
         transforms.Normalize(mean, std)
     ])
@@ -278,7 +278,7 @@ def get_test_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, shuff
 
 def calculate_mean_std(data_dir):
     transform = transforms.Compose([
-        transforms.Resize((64, 64)),  # 调整图像大小为 224x224
+        transforms.Resize((256, 256)),  # 调整图像大小为 224x224
         transforms.ToTensor()
     ])
     
