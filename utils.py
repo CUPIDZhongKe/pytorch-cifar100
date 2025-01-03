@@ -177,6 +177,7 @@ def get_network(args):
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             # 使用 DataParallel 包装模型
             net = nn.DataParallel(net)
+        print("Let's use", torch.cuda.device_count(), "GPUs!")
         net = net.cuda()
 
     return net
