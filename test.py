@@ -26,18 +26,19 @@ if __name__ == '__main__':
     parser.add_argument('-net', type=str, required=True, help='net type')
     parser.add_argument('-weights', type=str, required=True, help='the weights file you want to test')
     parser.add_argument('-gpu', action='store_true', default=False, help='use gpu or not')
-    parser.add_argument('-b', type=int, default=32, help='batch size for dataloader')
+    parser.add_argument('-datadir', type=str, default='./data', help='the path of data')
+    parser.add_argument('-batchsize', type=int, default=32, help='batch size for dataloader')
     args = parser.parse_args()
 
     net = get_network(args)
 
     mean, std = calculate_mean_std(os.path.join(args.datadir, 'test'))
     test_loader = get_test_dataloader(
+        args.datadir,
         mean,
         std,
-        #settings.CIFAR100_PATH,
-        num_workers=8,
-        batch_size=args.b,
+        batch_size=args.batchsize,
+        num_workers=8
     )
 
     net.load_state_dict(torch.load(args.weights))
@@ -55,8 +56,8 @@ if __name__ == '__main__':
             if args.gpu:
                 image = image.cuda()
                 label = label.cuda()
-                print('GPU INFO.....')
-                print(torch.cuda.memory_summary(), end='')
+                # print('GPU INFO.....')
+                # print(torch.cuda.memory_summary(), end='')
 
 
             output = net(image)
