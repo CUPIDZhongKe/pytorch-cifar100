@@ -147,7 +147,9 @@ if __name__ == '__main__':
     #     shuffle=True
     # )
 
-    mean, std = calculate_mean_std(os.path.join(args.datadir, 'train'))
+    mean = 0
+    std = 0
+    # mean, std = calculate_mean_std(os.path.join(args.datadir, 'train'))
     training_loader = get_training_dataloader(
         args.datadir, 
         mean, 

@@ -5,12 +5,18 @@ author baiyu
 import os
 import sys
 import pickle
+import cv2
 
-from skimage import io
+# from skimage import io
 import matplotlib.pyplot as plt
 import numpy
 import torch
 from torch.utils.data import Dataset
+import os
+from PIL import Image
+import torch
+from torch.utils.data import Dataset, DataLoader
+import torchvision.transforms as transforms
 
 class CIFAR100Train(Dataset):
     """cifar100 test dataset, derived from
@@ -61,3 +67,24 @@ class CIFAR100Test(Dataset):
             image = self.transform(image)
         return label, image
 
+class PairedDataset(Dataset):
+    def __init__(self, pairs, labels, transform=None):
+        self.pairs = pairs
+        self.labels = labels
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.pairs)
+
+    def __getitem__(self, idx):
+        vis_path, trans_path = self.pairs[idx]
+        label = self.labels[idx]
+        vis_image = Image.open(vis_path).convert('RGB')
+        trans_image = Image.open(trans_path).convert('RGB')
+
+        if self.transform:
+            vis_image = self.transform(vis_image)
+            trans_image = self.transform(trans_image)
+            
+        return vis_image, trans_image, label
+    

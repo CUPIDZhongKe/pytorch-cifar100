@@ -6,9 +6,10 @@ import os
 import sys
 import re
 import datetime
-
-import numpy
-
+import cv2
+from PIL import Image
+import numpy as np 
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import _LRScheduler
@@ -17,6 +18,8 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 from conf import settings
+from dataset import PairedDataset
+from sklearn.model_selection import train_test_split
 
 def get_network(args):
     """ return given network
@@ -252,7 +255,7 @@ def get_training_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, s
         transforms.RandomCrop(256, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize(mean, std)
+        # transforms.Normalize(mean, std)
     ])
     train_dataset = ImageFolder(root=os.path.join(data_dir, 'train'), transform=transform_train)
     train_loader = DataLoader(train_dataset, shuffle=shuffle, num_workers=num_workers, batch_size=batch_size, pin_memory=pin_memory)
@@ -272,7 +275,7 @@ def get_test_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, shuff
     transform_test = transforms.Compose([
         transforms.Resize((256, 256)),  # 调整图像大小为 224x224
         transforms.ToTensor(),
-        transforms.Normalize(mean, std)
+        # transforms.Normalize(mean, std)
     ])
     test_dataset = ImageFolder(root=os.path.join(data_dir, 'test'), transform=transform_test)
     test_loader = DataLoader(test_dataset, shuffle=shuffle, num_workers=num_workers, batch_size=batch_size, pin_memory=pin_memory)
@@ -304,6 +307,36 @@ def calculate_mean_std(data_dir):
     print(f'Mean: {mean}')
     print(f'Std: {std}')
     return mean, std
+
+# def calculate_mean_std(vis_dir, trans_dir):
+#     means = []
+#     stds = []
+#     transform = transforms.ToTensor()
+
+#     # 遍历可见光图像文件夹
+#     for class_id in range(1, 8):
+#         vis_class_dir = os.path.join(vis_dir, str(class_id))
+#         for vis_img in tqdm(os.listdir(vis_class_dir), desc=f"Processing {vis_class_dir}"):
+#             vis_path = os.path.join(vis_class_dir, vis_img)
+#             image = Image.open(vis_path).convert('RGB')
+#             tensor_image = transform(image)
+#             means.append(tensor_image.mean(dim=(1, 2)))
+#             stds.append(tensor_image.std(dim=(1, 2)))
+
+#     # 遍历透射可见图像文件夹
+#     for class_id in range(1, 8):
+#         trans_class_dir = os.path.join(trans_dir, str(class_id))
+#         for trans_img in tqdm(os.listdir(trans_class_dir), desc=f"Processing {trans_class_dir}"):
+#             trans_path = os.path.join(trans_class_dir, trans_img)
+#             image = Image.open(trans_path).convert('RGB')
+#             tensor_image = transform(image)
+#             means.append(tensor_image.mean(dim=(1, 2)))
+#             stds.append(tensor_image.std(dim=(1, 2)))
+
+#     # 计算所有图像的均值和标准差
+#     mean = torch.stack(means).mean(dim=0)
+#     std = torch.stack(stds).mean(dim=0)
+#     return mean, std
 
 def compute_mean_std(cifar100_dataset):
     """compute the mean and std of cifar100 dataset
@@ -399,29 +432,77 @@ def best_acc_weights(weights_folder):
     best_files = sorted(best_files, key=lambda w: int(re.search(regex_str, w).groups()[1]))
     return best_files[-1]
 
+def make_pairs_and_labels(vis_dir, trans_dir):
+    pairs = []
+    labels = []
+    for class_id in range(1, 8):
+        vis_class_dir = os.path.join(vis_dir, str(class_id))
+        trans_class_dir = os.path.join(trans_dir, str(class_id))
+        vis_images = sorted(os.listdir(vis_class_dir))
+        trans_images = sorted(os.listdir(trans_class_dir))
+        for vis_img, trans_img in zip(vis_images, trans_images):
+            vis_path = os.path.join(vis_class_dir, vis_img)
+            trans_path = os.path.join(trans_class_dir, trans_img)
+            pairs.append((vis_path, trans_path))
+            labels.append(class_id)  # 类标签从0开始
+    return pairs, labels
+
+def get_paired_dataloaders(vis_dir, trans_dir, mean, std, batch_size=16, num_workers=2, shuffle=True, pin_memory=True, test_size=0.2):
+    pairs, labels = make_pairs_and_labels(vis_dir, trans_dir)
+    train_pairs, test_pairs, train_labels, test_labels = train_test_split(pairs, labels, test_size=test_size, stratify=labels)
+
+    transform = transforms.Compose([
+        transforms.Resize((256, 256)),
+        transforms.RandomCrop(256, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std)
+    ])
+
+    train_dataset = PairedDataset(train_pairs, train_labels, transform=transform)
+    test_dataset = PairedDataset(test_pairs, test_labels, transform=transform)
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
+
+    return train_loader, test_loader
+
+def show_images(vis_image, trans_image):
+    vis_image = vis_image.permute(1, 2, 0).cpu().numpy()
+    trans_image = trans_image.permute(1, 2, 0).cpu().numpy()
+
+    vis_image = (vis_image * 255).astype(np.uint8)
+    trans_image = (trans_image * 255).astype(np.uint8)
+
+    combined_image = np.hstack((vis_image, trans_image))
+    cv2.imshow('Vis and Trans Images', combined_image)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
-    # data_dir = r'F:\datasets\docDataset_oneside_vis'
-    # mean, std = calculate_mean_std(os.path.join(data_dir, 'train'))
-    # train_loader = get_train_dataloader(data_dir, mean, std)
-    # test_loader = get_test_dataloader(data_dir, mean, std)
+    data_dir = r'F:\datasets'
+    mean, std = calculate_mean_std(
+        os.path.join(data_dir, 'visset'),
+        # os.path.join(data_dir, 'transset')
+    )
+ 
     #data preprocessing:
-    cifar100_training_loader = get_training_dataloader(
-        settings.CIFAR100_TRAIN_MEAN,
-        settings.CIFAR100_TRAIN_STD,
-        num_workers=4,
-        batch_size=128,
-        shuffle=True
-    )
+    training_loader, test_loader = get_paired_dataloaders(
+        os.path.join(data_dir, 'visset'),
+        os.path.join(data_dir, 'transset'),
+        mean, 
+        std, 
+        num_workers=1,  # 增加 num_workers
+        batch_size=32,
+        shuffle=True,
+        pin_memory=True,  # 使用 pin_memory
+        test_size=0.3  # 设置测试集比例
+    )          
 
-    cifar100_test_loader = get_test_dataloader(
-        settings.CIFAR100_TRAIN_MEAN,
-        settings.CIFAR100_TRAIN_STD,
-        num_workers=4,
-        batch_size=128,
-        shuffle=True
-    )
-    # 示例：遍历训练数据
-    for batch_index, (images, labels) in enumerate(cifar100_training_loader):
-        print(batch_index, images.shape, labels.shape)
-        break
+    # # 示例：遍历训练数据
+    for batch_index, (vis_images, trans_images, labels) in enumerate(training_loader):
+        print(batch_index, vis_images.shape, trans_images.shape, labels.shape)
+        for i in range(vis_images.size(0)):
+            show_images(vis_images[i], trans_images[i])
+    #     # break
