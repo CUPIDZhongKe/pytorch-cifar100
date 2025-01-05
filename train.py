@@ -123,7 +123,7 @@ if __name__ == '__main__':
     parser.add_argument('-gpu', action='store_true', default=True, help='use gpu or not')
     parser.add_argument('-batch_size', type=int, default=32, help='batch size for dataloader')
     parser.add_argument('-warm', type=int, default=1, help='warm up training phase')
-    parser.add_argument('-lr', type=float, default=0.0001, help='initial learning rate')
+    parser.add_argument('-lr', type=float, default=0.00001, help='initial learning rate')
     parser.add_argument('-resume', action='store_true', default=False, help='resume training')
     parser.add_argument('-datadir', type=str, default='./data', help='dataset')
     args = parser.parse_args()

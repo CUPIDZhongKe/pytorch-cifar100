@@ -75,7 +75,7 @@ def rename_images_2(folder):
 def rename_files_3(folder):
     for filename in os.listdir(folder):
         # 匹配文件名模式 "i_可见光_xxxxxxxxxx.jpg" 或 "i_透视可见_xxxxxxxxxx.jpg"
-        match = re.match(r"(\d+)_([可见光|透视可见]+)_(\d+).jpg", filename)
+        match = re.match(r"(\d+)_([可见光|透射可见]+)_(\d+).jpg", filename)
         if match:
             i, type, x = match.groups()
             new_filename = f"{i}_{type}.jpg"
@@ -149,10 +149,10 @@ def process_images(input_folder, output_folder):
 
     filenames = os.listdir(input_folder)
     visible_files = [f for f in filenames if re.match(r"(\d+)_可见光.jpg", f)]
-    perspective_files = [f for f in filenames if re.match(r"(\d+)_透视可见.jpg", f)]
+    perspective_files = [f for f in filenames if re.match(r"(\d+)_透射可见.jpg", f)]
 
     visible_dict = {re.match(r"(\d+)_可见光.jpg", f).group(1): f for f in visible_files}
-    perspective_dict = {re.match(r"(\d+)_透视可见.jpg", f).group(1): f for f in perspective_files}
+    perspective_dict = {re.match(r"(\d+)_透射可见.jpg", f).group(1): f for f in perspective_files}
 
     for i in visible_dict:
         if i not in perspective_dict:
@@ -239,111 +239,111 @@ def move_images(input_folder, output_folder_vis, output_folder_trans):
             dst_path = os.path.join(output_folder_vis, filename)
             shutil.move(src_path, dst_path)
             print(f"Moved {filename} to {output_folder_vis}")
-        elif "透视可见" in filename:
+        elif "透射可见" in filename:
             src_path = os.path.join(input_folder, filename)
             dst_path = os.path.join(output_folder_trans, filename)
             shutil.move(src_path, dst_path)
             print(f"Moved {filename} to {output_folder_trans}")
 
-def copy_images(input_folder, output_folder):
+def copy_images(input_folder, train_folder, test_folder):
+    if not os.path.exists(train_folder):
+        os.makedirs(train_folder)
+    if not os.path.exists(test_folder):
+        os.makedirs(test_folder)
+
+    filenames = os.listdir(input_folder)
+    for filename in filenames:
+        match = re.match(r'(\d+)_\d+_([可见光|透射可见]+)\.jpg', filename)
+        if match:
+            x = int(match.group(1))
+            if 1 <= x <= 630:
+                src_path = os.path.join(input_folder, filename)
+                train_path = os.path.join(train_folder, filename)
+                shutil.copy(src_path, train_path)
+                print(f"Copied {filename} to {train_folder}")
+            else:
+                src_path = os.path.join(input_folder, filename)
+                test_path = os.path.join(test_folder, filename)
+                shutil.copy(src_path, test_path)
+                print(f"Copied {filename} to {test_folder}")
+
+def delete_all_files(folder):
+    if not os.path.exists(folder):
+        print(f"The folder {folder} does not exist.")
+        return
+
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+                print(f"Deleted file {file_path}")
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+                print(f"Deleted directory {file_path}")
+        except Exception as e:
+            print(f"Failed to delete {file_path}. Reason: {e}")
+
+def move_and_rename_images(input_folder, output_folder):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
     filenames = os.listdir(input_folder)
     for filename in filenames:
-        match = re.match(r'(\d+)_\d+_透视可见\.jpg', filename)
+        match = re.match(r'(\d+)_(\d+)_(可见光|透射可见)\.jpg', filename)
         if match:
-            x = int(match.group(1))
-            if 1 <= x <= 1680:
-                src_path = os.path.join(input_folder, filename)
-                dst_path = os.path.join(output_folder, filename)
-                shutil.copy(src_path, dst_path)
-                print(f"Copied {filename} to {output_folder}")
-
-import os
-import torch
-import torchvision.transforms as transforms
-from torchvision.datasets import ImageFolder
-from torch.utils.data import DataLoader
-
-def get_train_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, shuffle=True):
-    """ return training dataloader
-    Args:
-        data_dir: path to training dataset
-        mean: mean of training dataset
-        std: std of training dataset
-        batch_size: dataloader batchsize
-        num_workers: dataloader num_works
-        shuffle: whether to shuffle
-    Returns: train_loader: torch dataloader object
-    """
-    transform_train = transforms.Compose([
-        transforms.Resize((224, 224)),  # 调整图像大小为 224x224
-        transforms.RandomCrop(224, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean, std)
-    ])
-    train_dataset = ImageFolder(root=os.path.join(data_dir, 'train'), transform=transform_train)
-    train_loader = DataLoader(train_dataset, shuffle=shuffle, num_workers=num_workers, batch_size=batch_size)
-    return train_loader
-
-def get_test_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, shuffle=True):
-    """ return test dataloader
-    Args:
-        data_dir: path to test dataset
-        mean: mean of test dataset
-        std: std of test dataset
-        batch_size: dataloader batchsize
-        num_workers: dataloader num_works
-        shuffle: whether to shuffle
-    Returns: test_loader: torch dataloader object
-    """
-    transform_test = transforms.Compose([
-        transforms.Resize((224, 224)),  # 调整图像大小为 224x224
-        transforms.ToTensor(),
-        transforms.Normalize(mean, std)
-    ])
-    test_dataset = ImageFolder(root=os.path.join(data_dir, 'test'), transform=transform_test)
-    test_loader = DataLoader(test_dataset, shuffle=shuffle, num_workers=num_workers, batch_size=batch_size)
-    return test_loader
-
-def calculate_mean_std(data_dir):
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),  # 调整图像大小为 224x224
-        transforms.ToTensor()
-    ])
-    
-    dataset = ImageFolder(root=data_dir, transform=transform)
-    loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=2)
-
-    mean = 0.0
-    std = 0.0
-    nb_samples = 0
-
-    for data, _ in loader:
-        batch_samples = data.size(0)
-        data = data.view(batch_samples, data.size(1), -1)
-        mean += data.mean(2).sum(0)
-        std += data.std(2).sum(0)
-        nb_samples += batch_samples
-
-    mean /= nb_samples
-    std /= nb_samples
-
-    print(f'Mean: {mean}')
-    print(f'Std: {std}')
-    return mean, std
+            i = int(match.group(1))
+            j = match.group(2)
+            suffix = match.group(3)
+            new_i = i + 30
+            new_filename = f"{new_i}_{j}_{suffix}.jpg"
+            src_path = os.path.join(input_folder, filename)
+            dst_path = os.path.join(output_folder, new_filename)
+            shutil.copy(src_path, dst_path)
+            print(f"Copy and renamed {filename} to {new_filename}")
 
 
 if __name__ == "__main__":
-    data_dir = r'F:\datasets\docDataset_oneside_vis'
-    mean, std = calculate_mean_std(os.path.join(data_dir, 'train'))
-    train_loader = get_train_dataloader(data_dir, mean, std)
-    test_loader = get_test_dataloader(data_dir, mean, std)
+    for i in range(1, 8):
+        # input_folder = rf"F:\datasets\docDataset\{i}\双面"
+        # output_folder = rf"F:\datasets\docDataset\{i}\patches"
+        # process_images(input_folder, output_folder)
 
-    # 示例：遍历训练数据
-    for images, labels in train_loader:
-        print(images.shape, labels.shape)
-        break
+        # input_folder = rf"F:\datasets\docDataset\{i}\patches"
+        # output_folder_vis = rf"F:\datasets\docDataset\{i}\patches_vis_dual"
+        # output_folder_trans = rf"F:\datasets\docDataset\{i}\patches_trans_dual"
+        # move_images(input_folder, output_folder_vis, output_folder_trans)
 
+        # input_folder_vis = rf"F:\datasets\docDataset\{i}\patches_vis_dual"
+        # input_folder_trans = rf"F:\datasets\docDataset\{i}\patches_trans_dual"
+        # train_folder_trans = rf"F:\datasets\docDataset_twoside_trans\train\{i}"
+        # train_folder_vis = rf"F:\datasets\docDataset_twoside_vis\train\{i}"
+        # test_folder_trans = rf"F:\datasets\docDataset_twoside_trans\test\{i}"
+        # test_folder_vis = rf"F:\datasets\docDataset_twoside_vis\test\{i}"
+        # copy_images(input_folder_vis, train_folder_vis, test_folder_vis)
+        # copy_images(input_folder_trans, train_folder_trans, test_folder_trans)
+
+    #     folder_to_clean = rf"F:\datasets\docDataset\{i}\patches"
+    #     delete_all_files(folder_to_clean)
+        # folder_to_clean = rf"F:\datasets\docDataset\{i}\patches_vis_dual"
+        # delete_all_files(folder_to_clean)
+        # folder_to_clean = rf"F:\datasets\docDataset\{i}\patches_trans_dual"
+        # delete_all_files(folder_to_clean)
+        # input_folder_trans = r"F:\datasets\docDataset\docDataset_twoside_vis"
+        # input_folder_vis = r"F:\datasets\docDataset\docDataset_twoside_vis"
+        # delete_all_files(input_folder_vis)
+        # delete_all_files(input_folder_trans)
+
+        input_folder_path = rf"F:\datasets\docDataset_twoside_vis\train\{i}"
+        output_folder_path = rf"F:\datasets\docDataset_vis_mix\train\{i}"
+        move_and_rename_images(input_folder_path, output_folder_path)
+        input_folder_path = rf"F:\datasets\docDataset_twoside_vis\test\{i}"
+        output_folder_path = rf"F:\datasets\docDataset_vis_mix\test\{i}"
+        move_and_rename_images(input_folder_path, output_folder_path)
+
+        input_folder_path = rf"F:\datasets\docDataset_twoside_trans\train\{i}"
+        output_folder_path = rf"F:\datasets\docDataset_trans_mix\train\{i}"
+        move_and_rename_images(input_folder_path, output_folder_path)
+        input_folder_path = rf"F:\datasets\docDataset_twoside_trans\test\{i}"
+        output_folder_path = rf"F:\datasets\docDataset_trans_mix\test\{i}"
+        move_and_rename_images(input_folder_path, output_folder_path)
