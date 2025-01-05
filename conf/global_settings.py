@@ -20,7 +20,7 @@ CHECKPOINT_PATH = '/output/localFilesys/classificaition/results_trans_mix/checkp
 
 #total training epoches
 EPOCH = 200
-MILESTONES = [60, 120, 160]
+MILESTONES = [20, 40, 60, 120, 160]
 
 #initial learning rate
 #INIT_LR = 0.1
