@@ -6,6 +6,7 @@ from einops.layers.torch import Rearrange
 import torch.nn.functional as F
 from timm.models.layers import DropPath
 import antialiased_cnns
+import torchinfo
 
 class ConvBlock_down(nn.Module):
     def __init__(self, in_channels, hid_channels, out_channels, kernel_size=3, stride=1, padding=1, if_down=True):
@@ -82,7 +83,9 @@ class PatchEmbed(nn.Module):
                           0, 0))
 
         # 下采样patch_size倍
+        print("x: ", x.shape)
         x = self.proj(x)
+        print("x: ", x.shape)
         _, _, H, W = x.shape
         # flatten: [B, C, H, W] -> [B, C, HW]
         # transpose: [B, C, HW] -> [B, HW, C]
@@ -108,7 +111,7 @@ class DePatch(nn.Module):
         return x
 
 class Block(nn.Module):
-    # Transformer Encouder Block
+    # Transformer Encoder Block
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
         super().__init__()
@@ -121,7 +124,9 @@ class Block(nn.Module):
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
     def forward(self, x):
+        print("block x: ", x.shape)
         x = self.norm1(x)
+        print("block x: ", x.shape)
         attn, q, k, v = self.attn(x)
 
         # x = x + self.drop_path(attn(self.norm1(x)))
@@ -212,47 +217,87 @@ class caf(nn.Module):
         self.depatch = DePatch(channel=channel, embed_dim=dim, patch_size=patch_size)
 
     def forward(self, in_1, in_2):
-        # Patch Embeding1
-        in_emb1 = self.patchembed1(in_1)
-        B, N, C = in_emb1.shape
+        # print("caf in: ", in_1.shape, in_2.shape)
+        # # Patch Embeding1
+        # in_emb1 = self.patchembed1(in_1)
+        # B, N, C = in_emb1.shape
+        # print("in_emb1: ", in_emb1.shape)
 
-        # Transformer Encoder1
-        in_emb1 = self.TransformerEncoderBlocks1(in_emb1)
+        # # Transformer Encoder1
+        # in_emb1 = self.TransformerEncoderBlocks1(in_emb1)
+        # print("in_emb1: ", in_emb1.shape)
 
-        # cross self-attention Feature Extraction
-        _, q1, k1, v1 = self.QKV_Block1(in_emb1)
+        # # cross self-attention Feature Extraction
+        # _, q1, k1, v1 = self.QKV_Block1(in_emb1)
+
+        # attn1 = (q1 @ k1.transpose(-2, -1)) * self.scale
+        # attn1 = attn1.softmax(dim=-1)
+        # attn1 = self.attn_drop(attn1)
+
+        # # Patch Embeding2
+        # in_emb2 = self.patchembed2(in_2)
+
+        # # Transformer Encoder2
+        # in_emb2 = self.TransformerEncoderBlocks2(in_emb2)
+
+        # _, q2, k2, v2 = self.QKV_Block2(in_emb2)
+
+        # attn2 = (q2 @ k2.transpose(-2, -1)) * self.scale
+        # attn2 = attn2.softmax(dim=-1)
+        # attn2 = self.attn_drop(attn2)
+
+        # # cross attention
+        # x_attn1 = (attn1 @ v2).transpose(1, 2).reshape(B, N, C)
+        # x_attn1 = self.proj1(x_attn1)
+        # x_attn1 = self.proj_drop1(x_attn1)
+
+        # x_attn2 = (attn2 @ v1).transpose(1, 2).reshape(B, N, C)
+        # x_attn2 = self.proj2(x_attn2)
+        # x_attn2 = self.proj_drop2(x_attn2)
+
+        # x_attn = (x_attn1 + x_attn2) / 2
+
+        # # Patch Rearrange
+        # ori = in_2.shape  # b,c,h,w
+        # out1 = self.depatch(x_attn, ori)
+
+        # out = in_1 + in_2 + out1
+
+
+        # pure cross attention fusion
+        # 将特征图展平并调整维度顺序
+        batch_size, channels, height, width = in_1.shape
+        num_patches = height * width
+        embedding_dim = channels
+
+        # 重新排列为 [batch_size, num_patches, embedding_dim]
+        reshaped_1 = rearrange(in_1, 'b c h w -> b (h w) c')
+        reshaped_2 = rearrange(in_2, 'b c h w -> b (h w) c')
+
+        _, q1, k1, v1 = self.QKV_Block1(reshaped_1)
 
         attn1 = (q1 @ k1.transpose(-2, -1)) * self.scale
         attn1 = attn1.softmax(dim=-1)
         attn1 = self.attn_drop(attn1)
 
-        # Patch Embeding2
-        in_emb2 = self.patchembed2(in_2)
-
-        # Transformer Encoder2
-        in_emb2 = self.TransformerEncoderBlocks2(in_emb2)
-
-        _, q2, k2, v2 = self.QKV_Block2(in_emb2)
+        _, q2, k2, v2 = self.QKV_Block2(reshaped_2)
 
         attn2 = (q2 @ k2.transpose(-2, -1)) * self.scale
         attn2 = attn2.softmax(dim=-1)
         attn2 = self.attn_drop(attn2)
 
-        # cross attention
-
-        x_attn1 = (attn1 @ v2).transpose(1, 2).reshape(B, N, C)
+        x_attn1 = (attn1 @ v2).transpose(1, 2).reshape(batch_size, num_patches, embedding_dim)
         x_attn1 = self.proj1(x_attn1)
         x_attn1 = self.proj_drop1(x_attn1)
 
-        x_attn2 = (attn2 @ v1).transpose(1, 2).reshape(B, N, C)
+        x_attn2 = (attn2 @ v1).transpose(1, 2).reshape(batch_size, num_patches, embedding_dim)
         x_attn2 = self.proj2(x_attn2)
         x_attn2 = self.proj_drop2(x_attn2)
 
         x_attn = (x_attn1 + x_attn2) / 2
 
-        # Patch Rearrange
-        ori = in_2.shape  # b,c,h,w
-        out1 = self.depatch(x_attn, ori)
+        # 恢复原始形状 [batch_size, channels, height, width]
+        out1 = rearrange(x_attn, 'b (h w) c -> b c h w', h=height, w=width)
 
         out = in_1 + in_2 + out1
 
@@ -468,6 +513,63 @@ class ResNet(nn.Module):
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
+    def _make_layer(self, block, out_channels, num_blocks, stride):
+        """make resnet layers(by layer i didnt mean this 'layer' was the
+        same as a neuron netowork layer, ex. conv layer), one layer may
+        contain more than one residual block
+
+        Args:
+            block: block type, basic block or bottle neck block
+            out_channels: output depth channel number of this layer
+            num_blocks: how many blocks per layer
+            stride: the stride of the first block of this layer
+
+        Return:
+            return a resnet layer
+        """
+
+        # we have num_block blocks per layer, the first block
+        # could be 1 or 2, other blocks would always be 1
+        strides = [stride] + [1] * (num_blocks - 1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_channels, out_channels, stride))
+            self.in_channels = out_channels * block.expansion
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        output = self.conv1(x)
+        output = self.conv2_x(output)
+        output = self.conv3_x(output)
+        output = self.conv4_x(output)
+        output = self.conv5_x(output)
+        output = self.avg_pool(output)
+        output = output.view(output.size(0), -1)
+        output = self.fc(output)
+
+        return output
+
+class ResNet_SFF(nn.Module):
+
+    def __init__(self, block, num_block, num_classes=100):
+        super().__init__()
+
+        self.in_channels = 64
+
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True))
+        #we use a different inputsize than the original paper
+        #so conv2_x's stride is 1
+        self.conv2_x = self._make_layer(block, 64, num_block[0], 1)
+        self.conv3_x = self._make_layer(block, 128, num_block[1], 2)
+        self.conv4_x = self._make_layer(block, 256, num_block[2], 2)
+        self.conv5_x = self._make_layer(block, 512, num_block[3], 2)
+        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(512 * block.expansion, num_classes)
+
         self.sff = sff(patch_size=16, dim=256, num_heads=8, channels=512, fusionblock_depth=3,
                  qk_scale=None, attn_drop=0., proj_drop=0., img_size=256)
 
@@ -517,10 +619,85 @@ class ResNet(nn.Module):
 
         return output
 
+
+class ResNet_CAF(nn.Module):
+
+    def __init__(self, block, num_block, num_classes=100):
+        super().__init__()
+
+        self.in_channels = 64
+
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True))
+        #we use a different inputsize than the original paper
+        #so conv2_x's stride is 1
+        self.conv2_x = self._make_layer(block, 64, num_block[0], 1)
+        self.conv3_x = self._make_layer(block, 128, num_block[1], 2)
+        self.conv4_x = self._make_layer(block, 256, num_block[2], 2)
+        self.conv5_x = self._make_layer(block, 512, num_block[3], 2)
+        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(512 * block.expansion, num_classes)
+
+        self.caf = caf(patch_size=16, dim=512, num_heads=8, channel=512, depth=3,
+                 qk_scale=None, attn_drop=0., proj_drop=0.)
+
+    def _make_layer(self, block, out_channels, num_blocks, stride):
+        """make resnet layers(by layer i didnt mean this 'layer' was the
+        same as a neuron netowork layer, ex. conv layer), one layer may
+        contain more than one residual block
+
+        Args:
+            block: block type, basic block or bottle neck block
+            out_channels: output depth channel number of this layer
+            num_blocks: how many blocks per layer
+            stride: the stride of the first block of this layer
+
+        Return:
+            return a resnet layer
+        """
+
+        # we have num_block blocks per layer, the first block
+        # could be 1 or 2, other blocks would always be 1
+        strides = [stride] + [1] * (num_blocks - 1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_channels, out_channels, stride))
+            self.in_channels = out_channels * block.expansion
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x, y):
+        x1 = self.conv1(x)
+        x2 = self.conv2_x(x1)
+        x3 = self.conv3_x(x2)
+        x4 = self.conv4_x(x3)
+        x5 = self.conv5_x(x4)
+
+        y1 = self.conv1(y)
+        y2 = self.conv2_x(y1)
+        y3 = self.conv3_x(y2)
+        y4 = self.conv4_x(y3)
+        y5 = self.conv5_x(y4)
+
+        output = self.caf(x5, y5)
+
+        output = self.avg_pool(output)
+        output = output.view(output.size(0), -1)
+        output = self.fc(output)
+
+        return output
+
 def resnet18_sff():
     """ return a ResNet 18 object
     """
-    return ResNet(BasicBlock, [2, 2, 2, 2])
+    return ResNet_SFF(BasicBlock, [2, 2, 2, 2])
+
+def resnet18_caf():
+    """ return a ResNet 18 object
+    """
+    return ResNet_CAF(BasicBlock, [2, 2, 2, 2])
 
 def resnet34():
     """ return a ResNet 34 object
@@ -544,14 +721,16 @@ def resnet152():
 
 
 if __name__ == "__main__":
-    img1 = torch.randn(3, 3, 256, 256)
-    img2 = torch.randn(3, 3, 256, 256)
+    img1 = torch.randn(32, 3, 256, 256)
+    img2 = torch.randn(32, 3, 256, 256)
 
-    net = resnet18_sff()
+    net = resnet18_caf()
 
-    z = net(img1, img2)
+    torchinfo.summary(net, input_data=(img1, img2))
 
-    print(z.shape)
+    # z = net(img1, img2)
+
+    # print(z.shape)
 
 
 

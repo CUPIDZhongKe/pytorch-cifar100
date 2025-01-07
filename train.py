@@ -30,14 +30,15 @@ def train(epoch):
 
     start = time.time()
     net.train()
-    for batch_index, (images, labels) in enumerate(training_loader):
+    for batch_index, (vis_images, trans_images, labels) in enumerate(training_loader):
 
         if args.gpu:
             labels = labels.cuda()
-            images = images.cuda()
+            vis_images = vis_images.cuda()
+            trans_images = trans_images.cuda()
 
         optimizer.zero_grad()
-        outputs = net(images)
+        outputs = net(vis_images, trans_images)
         loss = loss_function(outputs, labels)
         loss.backward()
         optimizer.step()
@@ -55,7 +56,7 @@ def train(epoch):
             loss.item(),
             optimizer.param_groups[0]['lr'],
             epoch=epoch,
-            trained_samples=batch_index * args.batch_size + len(images),
+            trained_samples=batch_index * args.batch_size + len(vis_images),
             total_samples=len(training_loader.dataset)
         ))
 
@@ -83,13 +84,14 @@ def eval_training(epoch=0, tb=True):
     test_loss = 0.0 # cost function error
     correct = 0.0
 
-    for (images, labels) in test_loader:
+    for (vis_images, trans_images, labels) in test_loader:
 
         if args.gpu:
-            images = images.cuda()
+            vis_images = vis_images.cuda()
+            trans_images = trans_images.cuda()
             labels = labels.cuda()
 
-        outputs = net(images)
+        outputs = net(vis_images, trans_images)
         loss = loss_function(outputs, labels)
 
         test_loss += loss.item()
@@ -129,6 +131,16 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     net = get_network(args)
+
+    if args.resume:
+        recent_folder = most_recent_folder(os.path.join(settings.CHECKPOINT_PATH, args.net), fmt=settings.DATE_FORMAT)
+        if not recent_folder:
+            raise Exception('no recent folder were found')
+
+        checkpoint_path = os.path.join(settings.CHECKPOINT_PATH, args.net, recent_folder)
+
+    else:
+        checkpoint_path = os.path.join(settings.CHECKPOINT_PATH, args.net, settings.TIME_NOW)   
 
     #data preprocessing:
     mean = [0.0, 0.0]
@@ -180,16 +192,6 @@ if __name__ == '__main__':
     iter_per_epoch = len(training_loader)
     warmup_scheduler = WarmUpLR(optimizer, iter_per_epoch * args.warm)
 
-    if args.resume:
-        recent_folder = most_recent_folder(os.path.join(settings.CHECKPOINT_PATH, args.net), fmt=settings.DATE_FORMAT)
-        if not recent_folder:
-            raise Exception('no recent folder were found')
-
-        checkpoint_path = os.path.join(settings.CHECKPOINT_PATH, args.net, recent_folder)
-
-    else:
-        checkpoint_path = os.path.join(settings.CHECKPOINT_PATH, args.net, settings.TIME_NOW)
-
     #use tensorboard
     if not os.path.exists(settings.LOG_DIR):
         os.mkdir(settings.LOG_DIR)
@@ -198,10 +200,14 @@ if __name__ == '__main__':
     #so the only way is to create a new tensorboard log
     writer = SummaryWriter(log_dir=os.path.join(
             settings.LOG_DIR, args.net, settings.TIME_NOW))
-    input_tensor = torch.Tensor(1, 3, 32, 32)
+    # 创建两个输入张量
+    input_tensor_x = torch.Tensor(1, 3, 256, 256)
+    input_tensor_y = torch.Tensor(1, 3, 256, 256)
     if args.gpu:
-        input_tensor = input_tensor.cuda()
-    writer.add_graph(net, input_tensor)
+        input_tensor_x = input_tensor_x.cuda()
+        input_tensor_y = input_tensor_y.cuda()
+    # 传递两个输入张量给模型
+    writer.add_graph(net, (input_tensor_x, input_tensor_y))
 
     #create checkpoint folder to save model
     if not os.path.exists(checkpoint_path):

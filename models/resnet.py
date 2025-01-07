@@ -10,6 +10,7 @@
 
 import torch
 import torch.nn as nn
+import torchinfo
 
 class BasicBlock(nn.Module):
     """Basic Block for resnet 18 and resnet 34
@@ -160,4 +161,6 @@ def resnet152():
     return ResNet(BottleNeck, [3, 8, 36, 3])
 
 
-
+if __name__ == '__main__':
+    model = resnet18()
+    torchinfo.summary(model, input_size=(1, 3, 224, 224))

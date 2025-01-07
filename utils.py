@@ -6,7 +6,7 @@ import os
 import sys
 import re
 import datetime
-import cv2
+# import cv2
 from PIL import Image
 import numpy
 from tqdm import tqdm
@@ -172,9 +172,12 @@ def get_network(args):
     elif args.net == 'resnet18-fpn':
         from models.resnet_fpn import resnet18_fpn
         net = resnet18_fpn()
-    elif args.net == 'cafresnet18':
+    elif args.net == 'resnet18-sff':
         from models.cafresnet import resnet18_sff
         net = resnet18_sff()    
+    elif args.net == 'resnet18-caf':
+        from models.cafresnet import resnet18_caf
+        net = resnet18_caf()    
     else:
         print('the network name you have entered is not supported yet')
         sys.exit()
@@ -387,6 +390,8 @@ def most_recent_folder(net_weights, fmt):
 
     # filter out empty folders
     folders = [f for f in folders if len(os.listdir(os.path.join(net_weights, f)))]
+    print("folders: ", folders)
+
     if len(folders) == 0:
         return ''
 
