@@ -24,7 +24,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from conf import settings
 from utils import get_network, get_training_dataloader, get_test_dataloader, WarmUpLR, \
-    most_recent_folder, most_recent_weights, last_epoch, best_acc_weights, calculate_mean_std
+    most_recent_folder, most_recent_weights, last_epoch, best_acc_weights, calculate_mean_std, get_paired_dataloaders
 
 def train(epoch):
 
@@ -131,44 +131,48 @@ if __name__ == '__main__':
     net = get_network(args)
 
     #data preprocessing:
-    # cifar100_training_loader = get_training_dataloader(
-    #     settings.CIFAR100_TRAIN_MEAN,
-    #     settings.CIFAR100_TRAIN_STD,
-    #     num_workers=4,
-    #     batch_size=args.b,
-    #     shuffle=True
-    # )
+    mean = [0.0, 0.0]
+    std = [0.0, 0.0]
+    mean[0], std[0] = calculate_mean_std(
+        os.path.join(args.datadir, 'docDataset_vis')
+    )
+    mean[1], std[1] = calculate_mean_std(
+        os.path.join(args.datadir, 'docDataset_trans')
+    )
+    #data preprocessing:
+    training_loader, test_loader = get_paired_dataloaders(
+        os.path.join(args.datadir, 'docDataset_vis'),
+        os.path.join(args.datadir, 'docDataset_trans'),
+        mean, 
+        std, 
+        num_workers=1,  # 增加 num_workers
+        batch_size=32,
+        shuffle=True,
+        pin_memory=True,  # 使用 pin_memory
+        test_size=0.3  # 设置测试集比例
+    )      
 
-    # cifar100_test_loader = get_test_dataloader(
-    #     settings.CIFAR100_TRAIN_MEAN,
-    #     settings.CIFAR100_TRAIN_STD,
-    #     num_workers=4,
-    #     batch_size=args.b,
-    #     shuffle=True
-    # )
 
-    mean = 0
-    std = 0
     # mean, std = calculate_mean_std(os.path.join(args.datadir, 'train'))
-    training_loader = get_training_dataloader(
-        args.datadir, 
-        mean, 
-        std, 
-        num_workers=8, 
-        batch_size=args.batch_size,
-        shuffle=True,
-        pin_memory=True
-        )
+    # training_loader = get_training_dataloader(
+    #     args.datadir, 
+    #     mean, 
+    #     std, 
+    #     num_workers=8, 
+    #     batch_size=args.batch_size,
+    #     shuffle=True,
+    #     pin_memory=True
+    #     )
     
-    test_loader = get_test_dataloader(        
-        args.datadir, 
-        mean, 
-        std, 
-        num_workers=8, 
-        batch_size=args.batch_size,
-        shuffle=True,
-        pin_memory=True
-        )
+    # test_loader = get_test_dataloader(        
+    #     args.datadir, 
+    #     mean, 
+    #     std, 
+    #     num_workers=8, 
+    #     batch_size=args.batch_size,
+    #     shuffle=True,
+    #     pin_memory=True
+    #     )
 
     loss_function = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)

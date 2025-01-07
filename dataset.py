@@ -5,9 +5,6 @@ author baiyu
 import os
 import sys
 import pickle
-import cv2
-
-# from skimage import io
 import matplotlib.pyplot as plt
 import numpy
 import torch
@@ -68,10 +65,11 @@ class CIFAR100Test(Dataset):
         return label, image
 
 class PairedDataset(Dataset):
-    def __init__(self, pairs, labels, transform=None):
+    def __init__(self, pairs, labels, transform_vis=None, transform_trans=None):
         self.pairs = pairs
         self.labels = labels
-        self.transform = transform
+        self.transform_vis = transform_vis
+        self.transform_trans = transform_trans
 
     def __len__(self):
         return len(self.pairs)
@@ -82,9 +80,9 @@ class PairedDataset(Dataset):
         vis_image = Image.open(vis_path).convert('RGB')
         trans_image = Image.open(trans_path).convert('RGB')
 
-        if self.transform:
-            vis_image = self.transform(vis_image)
-            trans_image = self.transform(trans_image)
-            
+        if self.transform_vis and self.transform_trans:
+            vis_image = self.transform_vis(vis_image)
+            trans_image = self.transform_trans(trans_image)
+
         return vis_image, trans_image, label
     

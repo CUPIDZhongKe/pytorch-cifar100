@@ -8,7 +8,7 @@ import re
 import datetime
 import cv2
 from PIL import Image
-import numpy as np 
+import numpy
 from tqdm import tqdm
 import torch
 import torch.nn as nn
@@ -161,7 +161,7 @@ def get_network(args):
         from models.single_branch_cprfnet import CPRFNet
         net = CPRFNet()
     elif args.net == 'cprfnet':
-        from models.cprfnet import CPRFNet
+        from models.cafresnet import CPRFNet
         net = CPRFNet()
     elif args.net == 'ranet18':
         from models.ranet import ranet18
@@ -172,6 +172,9 @@ def get_network(args):
     elif args.net == 'resnet18-fpn':
         from models.resnet_fpn import resnet18_fpn
         net = resnet18_fpn()
+    elif args.net == 'cafresnet18':
+        from models.cafresnet import resnet18_sff
+        net = resnet18_sff()    
     else:
         print('the network name you have entered is not supported yet')
         sys.exit()
@@ -255,7 +258,7 @@ def get_training_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, s
         transforms.RandomCrop(256, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        # transforms.Normalize(mean, std)
+        transforms.Normalize(mean, std)
     ])
     train_dataset = ImageFolder(root=os.path.join(data_dir, 'train'), transform=transform_train)
     train_loader = DataLoader(train_dataset, shuffle=shuffle, num_workers=num_workers, batch_size=batch_size, pin_memory=pin_memory)
@@ -275,7 +278,7 @@ def get_test_dataloader(data_dir, mean, std, batch_size=16, num_workers=2, shuff
     transform_test = transforms.Compose([
         transforms.Resize((256, 256)),  # 调整图像大小为 224x224
         transforms.ToTensor(),
-        # transforms.Normalize(mean, std)
+        transforms.Normalize(mean, std)
     ])
     test_dataset = ImageFolder(root=os.path.join(data_dir, 'test'), transform=transform_test)
     test_loader = DataLoader(test_dataset, shuffle=shuffle, num_workers=num_workers, batch_size=batch_size, pin_memory=pin_memory)
@@ -451,16 +454,24 @@ def get_paired_dataloaders(vis_dir, trans_dir, mean, std, batch_size=16, num_wor
     pairs, labels = make_pairs_and_labels(vis_dir, trans_dir)
     train_pairs, test_pairs, train_labels, test_labels = train_test_split(pairs, labels, test_size=test_size, stratify=labels)
 
-    transform = transforms.Compose([
+    transform_vis = transforms.Compose([
         transforms.Resize((256, 256)),
         transforms.RandomCrop(256, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize(mean, std)
+        transforms.Normalize(mean[0], std[0])
     ])
 
-    train_dataset = PairedDataset(train_pairs, train_labels, transform=transform)
-    test_dataset = PairedDataset(test_pairs, test_labels, transform=transform)
+    transform_trans = transforms.Compose([
+        transforms.Resize((256, 256)),
+        transforms.RandomCrop(256, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean[1], std[1])
+    ])
+
+    train_dataset = PairedDataset(train_pairs, train_labels, transform_vis=transform_vis, transform_trans=transform_trans)
+    test_dataset = PairedDataset(test_pairs, test_labels, transform_vis=transform_vis, transform_trans=transform_trans)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
@@ -471,10 +482,10 @@ def show_images(vis_image, trans_image):
     vis_image = vis_image.permute(1, 2, 0).cpu().numpy()
     trans_image = trans_image.permute(1, 2, 0).cpu().numpy()
 
-    vis_image = (vis_image * 255).astype(np.uint8)
-    trans_image = (trans_image * 255).astype(np.uint8)
+    vis_image = (vis_image * 255).astype(numpy.uint8)
+    trans_image = (trans_image * 255).astype(numpy.uint8)
 
-    combined_image = np.hstack((vis_image, trans_image))
+    combined_image = numpy.hstack((vis_image, trans_image))
     cv2.imshow('Vis and Trans Images', combined_image)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
@@ -482,11 +493,16 @@ def show_images(vis_image, trans_image):
 
 if __name__ == "__main__":
     data_dir = r'F:\datasets'
-    mean, std = calculate_mean_std(
+    mean = [0.0, 0.0]
+    std = [0.0, 0.0]
+    mean[0], std[0] = calculate_mean_std(
         os.path.join(data_dir, 'visset'),
         # os.path.join(data_dir, 'transset')
     )
- 
+    mean[1], std[1] = calculate_mean_std(
+        # os.path.join(data_dir, 'visset'),
+        os.path.join(data_dir, 'transset')
+    )
     #data preprocessing:
     training_loader, test_loader = get_paired_dataloaders(
         os.path.join(data_dir, 'visset'),
@@ -500,7 +516,7 @@ if __name__ == "__main__":
         test_size=0.3  # 设置测试集比例
     )          
 
-    # # 示例：遍历训练数据
+    # 示例：遍历训练数据
     for batch_index, (vis_images, trans_images, labels) in enumerate(training_loader):
         print(batch_index, vis_images.shape, trans_images.shape, labels.shape)
         for i in range(vis_images.size(0)):
