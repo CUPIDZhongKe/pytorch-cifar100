@@ -18,7 +18,7 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 
 from conf import settings
-from utils import get_network, get_test_dataloader, calculate_mean_std
+from utils import get_network, get_test_dataloader, calculate_mean_std, get_paired_dataloaders
 
 if __name__ == '__main__':
 
@@ -32,14 +32,37 @@ if __name__ == '__main__':
 
     net = get_network(args)
 
-    mean, std = calculate_mean_std(os.path.join(args.datadir, 'test'))
-    test_loader = get_test_dataloader(
-        args.datadir,
-        mean,
-        std,
-        batch_size=args.batchsize,
-        num_workers=8
+   #data preprocessing:
+    mean = [0.0, 0.0]
+    std = [0.0, 0.0]
+    mean[0], std[0] = calculate_mean_std(
+        os.path.join(args.datadir, 'docDataset_vis')
     )
+    mean[1], std[1] = calculate_mean_std(
+        os.path.join(args.datadir, 'docDataset_trans')
+    )
+    #data preprocessing:
+    _, test_loader = get_paired_dataloaders(
+        os.path.join(args.datadir, 'docDataset_vis'),
+        os.path.join(args.datadir, 'docDataset_trans'),
+        mean, 
+        std, 
+        num_workers=1,  # 增加 num_workers
+        batch_size=32,
+        shuffle=True,
+        pin_memory=True,  # 使用 pin_memory
+        test_size=0.3  # 设置测试集比例
+    )   
+
+
+    # mean, std = calculate_mean_std(os.path.join(args.datadir, 'test'))
+    # test_loader = get_test_dataloader(
+    #     args.datadir,
+    #     mean,
+    #     std,
+    #     batch_size=args.batchsize,
+    #     num_workers=8
+    # )
 
     net.load_state_dict(torch.load(args.weights))
     print(net)
@@ -50,17 +73,18 @@ if __name__ == '__main__':
     total = 0
 
     with torch.no_grad():
-        for n_iter, (image, label) in enumerate(test_loader):
+        for n_iter, (vis_image, trans_image, label) in enumerate(test_loader):
             print("iteration: {}\ttotal {} iterations".format(n_iter + 1, len(test_loader)))
 
             if args.gpu:
-                image = image.cuda()
+                vis_image = vis_image.cuda()
+                trans_image = trans_image.cuda()
                 label = label.cuda()
                 # print('GPU INFO.....')
                 # print(torch.cuda.memory_summary(), end='')
 
 
-            output = net(image)
+            output = net(vis_image, trans_image)
             _, pred = output.topk(5, 1, largest=True, sorted=True)
 
             label = label.view(label.size(0), -1).expand_as(pred)

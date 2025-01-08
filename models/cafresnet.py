@@ -83,9 +83,7 @@ class PatchEmbed(nn.Module):
                           0, 0))
 
         # 下采样patch_size倍
-        print("x: ", x.shape)
         x = self.proj(x)
-        print("x: ", x.shape)
         _, _, H, W = x.shape
         # flatten: [B, C, H, W] -> [B, C, HW]
         # transpose: [B, C, HW] -> [B, HW, C]
@@ -124,9 +122,7 @@ class Block(nn.Module):
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
     def forward(self, x):
-        print("block x: ", x.shape)
         x = self.norm1(x)
-        print("block x: ", x.shape)
         attn, q, k, v = self.attn(x)
 
         # x = x + self.drop_path(attn(self.norm1(x)))
@@ -184,9 +180,9 @@ class Attention(nn.Module):
         x = self.proj_drop(x)
         return x, q, k, v
 
-class caf(nn.Module):
+class TransCAF(nn.Module):
     def __init__(self, patch_size, dim, num_heads, channel, proj_drop, depth, qk_scale, attn_drop):
-        super(caf, self).__init__()
+        super(TransCAF, self).__init__()
 
         self.patchembed1 = PatchEmbed(patch_size=patch_size, in_c=channel, embed_dim=dim)
         self.patchembed2 = PatchEmbed(patch_size=patch_size, in_c=channel, embed_dim=dim)
@@ -217,53 +213,86 @@ class caf(nn.Module):
         self.depatch = DePatch(channel=channel, embed_dim=dim, patch_size=patch_size)
 
     def forward(self, in_1, in_2):
-        # print("caf in: ", in_1.shape, in_2.shape)
-        # # Patch Embeding1
-        # in_emb1 = self.patchembed1(in_1)
-        # B, N, C = in_emb1.shape
-        # print("in_emb1: ", in_emb1.shape)
+        # Patch Embeding1
+        in_emb1 = self.patchembed1(in_1)
+        B, N, C = in_emb1.shape
 
-        # # Transformer Encoder1
-        # in_emb1 = self.TransformerEncoderBlocks1(in_emb1)
-        # print("in_emb1: ", in_emb1.shape)
+        # Transformer Encoder1
+        in_emb1 = self.TransformerEncoderBlocks1(in_emb1)
 
-        # # cross self-attention Feature Extraction
-        # _, q1, k1, v1 = self.QKV_Block1(in_emb1)
+        # cross self-attention Feature Extraction
+        _, q1, k1, v1 = self.QKV_Block1(in_emb1)
 
-        # attn1 = (q1 @ k1.transpose(-2, -1)) * self.scale
-        # attn1 = attn1.softmax(dim=-1)
-        # attn1 = self.attn_drop(attn1)
+        attn1 = (q1 @ k1.transpose(-2, -1)) * self.scale
+        attn1 = attn1.softmax(dim=-1)
+        attn1 = self.attn_drop(attn1)
 
-        # # Patch Embeding2
-        # in_emb2 = self.patchembed2(in_2)
+        # Patch Embeding2
+        in_emb2 = self.patchembed2(in_2)
 
-        # # Transformer Encoder2
-        # in_emb2 = self.TransformerEncoderBlocks2(in_emb2)
+        # Transformer Encoder2
+        in_emb2 = self.TransformerEncoderBlocks2(in_emb2)
 
-        # _, q2, k2, v2 = self.QKV_Block2(in_emb2)
+        _, q2, k2, v2 = self.QKV_Block2(in_emb2)
 
-        # attn2 = (q2 @ k2.transpose(-2, -1)) * self.scale
-        # attn2 = attn2.softmax(dim=-1)
-        # attn2 = self.attn_drop(attn2)
+        attn2 = (q2 @ k2.transpose(-2, -1)) * self.scale
+        attn2 = attn2.softmax(dim=-1)
+        attn2 = self.attn_drop(attn2)
 
-        # # cross attention
-        # x_attn1 = (attn1 @ v2).transpose(1, 2).reshape(B, N, C)
-        # x_attn1 = self.proj1(x_attn1)
-        # x_attn1 = self.proj_drop1(x_attn1)
+        # cross attention
+        x_attn1 = (attn1 @ v2).transpose(1, 2).reshape(B, N, C)
+        x_attn1 = self.proj1(x_attn1)
+        x_attn1 = self.proj_drop1(x_attn1)
 
-        # x_attn2 = (attn2 @ v1).transpose(1, 2).reshape(B, N, C)
-        # x_attn2 = self.proj2(x_attn2)
-        # x_attn2 = self.proj_drop2(x_attn2)
+        x_attn2 = (attn2 @ v1).transpose(1, 2).reshape(B, N, C)
+        x_attn2 = self.proj2(x_attn2)
+        x_attn2 = self.proj_drop2(x_attn2)
 
-        # x_attn = (x_attn1 + x_attn2) / 2
+        x_attn = (x_attn1 + x_attn2) / 2
 
-        # # Patch Rearrange
-        # ori = in_2.shape  # b,c,h,w
-        # out1 = self.depatch(x_attn, ori)
+        print("x_attn: ", x_attn.shape)
+
+        # Patch Rearrange
+        ori = in_2.shape  # b,c,h,w
+        out1 = self.depatch(x_attn, ori)
 
         # out = in_1 + in_2 + out1
 
+        return out1
+    
+class CAF(nn.Module):
+    def __init__(self, patch_size, dim, num_heads, channel, proj_drop, depth, qk_scale, attn_drop):
+        super(CAF, self).__init__()
 
+        self.patchembed1 = PatchEmbed(patch_size=patch_size, in_c=channel, embed_dim=dim)
+        self.patchembed2 = PatchEmbed(patch_size=patch_size, in_c=channel, embed_dim=dim)
+
+        self.TransformerEncoderBlocks1 = nn.Sequential(*[
+            TransformerEncoderBlock(dim=dim, num_heads=num_heads)
+            for i in range(depth)
+        ])
+        self.TransformerEncoderBlocks2 = nn.Sequential(*[
+            TransformerEncoderBlock(dim=dim, num_heads=num_heads)
+            for i in range(depth)
+        ])
+
+        self.QKV_Block1 = Block(dim=dim, num_heads=num_heads)
+        self.QKV_Block2 = Block(dim=dim, num_heads=num_heads)
+
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = qk_scale or head_dim ** -0.5
+
+        self.attn_drop = nn.Dropout(attn_drop)
+
+        self.proj1 = nn.Linear(dim, dim)
+        self.proj2 = nn.Linear(dim, dim)
+        self.proj_drop1 = nn.Dropout(proj_drop)
+        self.proj_drop2 = nn.Dropout(proj_drop)
+
+        self.depatch = DePatch(channel=channel, embed_dim=dim, patch_size=patch_size)
+
+    def forward(self, in_1, in_2):
         # pure cross attention fusion
         # 将特征图展平并调整维度顺序
         batch_size, channels, height, width = in_1.shape
@@ -299,9 +328,10 @@ class caf(nn.Module):
         # 恢复原始形状 [batch_size, channels, height, width]
         out1 = rearrange(x_attn, 'b (h w) c -> b c h w', h=height, w=width)
 
-        out = in_1 + in_2 + out1
+        # out = in_1 + in_2 + out1
 
-        return out
+        return out1
+
 
 class TransformerEncoderBlock(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
@@ -331,13 +361,13 @@ class sff(nn.Module):
         super(sff, self).__init__()
 
         # Fusion Block
-        self.FusionBlock1 = caf(patch_size=patch_size, dim=dim, num_heads=num_heads, channel=channels,
+        self.FusionBlock1 = TransCAF(patch_size=patch_size, dim=dim, num_heads=num_heads, channel=channels,
                                 proj_drop=proj_drop, depth=fusionblock_depth, qk_scale=qk_scale,
                                 attn_drop=attn_drop)
-        self.FusionBlock2 = caf(patch_size=patch_size, dim=dim, num_heads=num_heads, channel=channels,
+        self.FusionBlock2 = TransCAF(patch_size=patch_size, dim=dim, num_heads=num_heads, channel=channels,
                                 proj_drop=proj_drop, depth=fusionblock_depth, qk_scale=qk_scale,
                                 attn_drop=attn_drop)
-        self.FusionBlock_final = caf(patch_size=patch_size, dim=dim, num_heads=num_heads,
+        self.FusionBlock_final = TransCAF(patch_size=patch_size, dim=dim, num_heads=num_heads,
                                      channel=channels,
                                      proj_drop=proj_drop, depth=fusionblock_depth, qk_scale=qk_scale,
                                      attn_drop=attn_drop)
@@ -640,7 +670,7 @@ class ResNet_CAF(nn.Module):
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
-        self.caf = caf(patch_size=16, dim=512, num_heads=8, channel=512, depth=3,
+        self.caf = CAF(patch_size=16, dim=512, num_heads=8, channel=512, depth=3,
                  qk_scale=None, attn_drop=0., proj_drop=0.)
 
     def _make_layer(self, block, out_channels, num_blocks, stride):
@@ -724,7 +754,7 @@ if __name__ == "__main__":
     img1 = torch.randn(32, 3, 256, 256)
     img2 = torch.randn(32, 3, 256, 256)
 
-    net = resnet18_caf()
+    net = resnet18_sff()
 
     torchinfo.summary(net, input_data=(img1, img2))
 
