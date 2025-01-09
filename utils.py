@@ -177,7 +177,13 @@ def get_network(args):
         net = resnet18_sff()    
     elif args.net == 'resnet18-caf':
         from models.cafresnet import resnet18_caf
-        net = resnet18_caf()    
+        net = resnet18_caf()   
+    elif args.net == 'resnet18-trans-sff':
+        from models.cafresnet import resnet18_trans_sff
+        net = resnet18_trans_sff()
+    elif args.net == 'resnet18-pag':
+        from models.cafresnet import resnet18_pag
+        net = resnet18_pag()
     else:
         print('the network name you have entered is not supported yet')
         sys.exit()
@@ -419,7 +425,7 @@ def last_epoch(weights_folder):
     weight_file = most_recent_weights(weights_folder)
     if not weight_file:
        raise Exception('no recent weights were found')
-    resume_epoch = int(weight_file.split('-')[1])
+    resume_epoch = int(weight_file.split('-')[-2])
 
     return resume_epoch
 
@@ -525,5 +531,21 @@ if __name__ == "__main__":
     for batch_index, (vis_images, trans_images, labels) in enumerate(training_loader):
         print(batch_index, vis_images.shape, trans_images.shape, labels.shape)
         for i in range(vis_images.size(0)):
-            show_images(vis_images[i], trans_images[i])
+            x = vis_images[i]
+            y = trans_images[i]
+
+            y_f = torch.fft.fft2(y)  # Fourier Transform
+            y_f = torch.fft.fftshift(y_f)
+            y_f = torch.log(1 + torch.abs(y_f))
+
+            x_f = torch.fft.fft2(x)
+            x_f = torch.fft.fftshift(x_f)
+            x_f = torch.log(1 + torch.abs(x_f))
+
+            show_images(x_f, y_f)
+
+            # feature_y = torch.fft.ifftshift(feature_y)
+            # feature_y = torch.fft.ifft2(feature_y)
+            # feature_y = torch.abs(feature_y)
+            
     #     # break

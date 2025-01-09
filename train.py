@@ -125,7 +125,7 @@ if __name__ == '__main__':
     parser.add_argument('-gpu', action='store_true', default=True, help='use gpu or not')
     parser.add_argument('-batch_size', type=int, default=32, help='batch size for dataloader')
     parser.add_argument('-warm', type=int, default=1, help='warm up training phase')
-    parser.add_argument('-lr', type=float, default=0.00001, help='initial learning rate')
+    parser.add_argument('-lr', type=float, default=0.0001, help='initial learning rate')
     parser.add_argument('-resume', action='store_true', default=False, help='resume training')
     parser.add_argument('-datadir', type=str, default='./data', help='dataset')
     args = parser.parse_args()
@@ -157,7 +157,7 @@ if __name__ == '__main__':
         os.path.join(args.datadir, 'docDataset_trans'),
         mean, 
         std, 
-        num_workers=1,  # 增加 num_workers
+        num_workers=8,  # 增加 num_workers
         batch_size=32,
         shuffle=True,
         pin_memory=True,  # 使用 pin_memory
@@ -189,6 +189,12 @@ if __name__ == '__main__':
     loss_function = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
     train_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=settings.MILESTONES, gamma=0.2) #learning rate decay
+
+    # # 创建 Adam 优化器
+    # optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=5e-4)
+    # # 使用 ReduceLROnPlateau 作为学习率调度器
+    # train_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, verbose=True)    
+    
     iter_per_epoch = len(training_loader)
     warmup_scheduler = WarmUpLR(optimizer, iter_per_epoch * args.warm)
 

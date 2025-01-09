@@ -7,7 +7,348 @@ import torch.nn.functional as F
 from timm.models.layers import DropPath
 import antialiased_cnns
 import torchinfo
+import matplotlib.pyplot as plt
+import math
 
+''' FCMNet: Frequency-aware cross-modality attention networks for RGB-D salient object detection
+    https://github.com/XiaoJinNK/FCMNet.git
+'''
+
+def get_1d_dct(i, freq, L):
+    result = math.cos(math.pi * freq * (i+0.5)/L) / math.sqrt(L)
+    if freq == 0:
+        return result
+    else:
+        return result * math.sqrt(2)
+def get_dct_weights(width,height,channel,fidx_u,fidx_v):
+    dct_weights = torch.zeros(1, channel, width, height)
+    c_part = channel // len(fidx_u)
+    for i, (u_x, v_y) in enumerate(zip(fidx_u, fidx_v)):
+        for t_x in range(width):
+            for t_y in range(height):
+                dct_weights[:, i*c_part: (i+1)*c_part, t_x, t_y] = get_1d_dct(t_x, u_x, width) * get_1d_dct(t_y, v_y, height)
+    return dct_weights
+
+class FCABlock(nn.Module):
+    """
+        FcaNet: Frequency Channel Attention Networks
+        https://arxiv.org/pdf/2012.11879.pdf
+    """
+    def __init__(self, channel,width,height,fidx_u, fidx_v, reduction=16):
+        super(FCABlock, self).__init__()
+        mid_channel = channel // reduction
+        self.register_buffer('pre_computed_dct_weights', get_dct_weights(width,height,channel,fidx_u,fidx_v))
+        self.excitation = nn.Sequential(
+            nn.Linear(channel, mid_channel, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(mid_channel, channel, bias=False),
+            nn.Sigmoid()
+        )
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = torch.sum(x * self.pre_computed_dct_weights, dim=[2,3])
+        z = self.excitation(y).view(b, c, 1, 1)
+        return x * z.expand_as(x)
+    
+class SFCA(nn.Module):
+    def __init__(self, in_channel,width,height,fidx_u,fidx_v):
+        super(SFCA, self).__init__()
+
+        fidx_u = [temp_u * (width // 8) for temp_u in fidx_u]
+        fidx_v = [temp_v * (width // 8) for temp_v in fidx_v]
+        self.FCA = FCABlock(in_channel, width, height, fidx_u, fidx_v)
+        self.conv1 = nn.Conv2d(in_channel, 1, kernel_size=1, bias=False)
+        self.norm = nn.Sigmoid()
+    def forward(self, x):
+        # FCA
+        F_fca = self.FCA(x)
+        #context attention
+        con = self.conv1(x) # c,h,w -> 1,h,w
+        con = self.norm(con)
+        F_con = x * con
+        return F_fca + F_con
+    
+class FACMA(nn.Module):
+    def __init__(self, in_channel, width, height, fidx_u, fidx_v):
+        super(FACMA, self).__init__()
+        self.sfca_depth = SFCA(in_channel, width, height, fidx_u, fidx_v)
+        self.sfca_rgb   = SFCA(in_channel, width, height, fidx_u, fidx_v)
+    def forward(self, rgb, depth):
+        out_d = self.sfca_depth(depth)
+        # out_d = rgb * out_d
+
+        out_rgb = self.sfca_rgb(rgb)
+        # out_rgb = depth * out_rgb
+        return out_rgb, out_d
+
+
+''' PlainUSR: Chasing Faster ConvNet for Efficient Super-Resolution
+    github：https://github.com/icandle/PlainUSR
+'''
+class SoftPooling2D(torch.nn.Module):
+    def __init__(self, kernel_size, stride=None,padding=0):
+        super(SoftPooling2D, self).__init__()
+        self.avgpool = torch.nn.AvgPool2d(kernel_size,stride,padding, count_include_pad=False)
+    def forward(self, x):
+        x_exp = torch.exp(x)
+        x_exp_pool = self.avgpool(x_exp)
+        x = self.avgpool(x_exp*x)
+        return x/x_exp_pool
+    
+class LocalAttention(nn.Module):
+    ''' attention based on local importance'''
+    def __init__(self, channels, f=16):
+        super().__init__()
+        self.body = nn.Sequential(
+            # sample importance
+            nn.Conv2d(channels, f, 1),
+            SoftPooling2D(3, stride=1),
+            nn.Conv2d(f, f, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(f, channels, 3, padding=1),
+            # to heatmap
+            nn.Sigmoid(),
+        )
+        self.gate = nn.Sequential(
+            nn.Sigmoid(),
+        )            
+    def forward(self, x):
+        ''' forward '''
+        # interpolate the heat map
+        g = self.gate(x[:,:1].clone())
+        w = F.interpolate(self.body(x), (x.size(2), x.size(3)), mode='bilinear', align_corners=False)
+        return x * w * g #(w + g) #self.gate(x, w) 
+
+''' PIDNet: A Real-time Semantic Segmentation Network Inspired from PID Controller
+    https://github.com/XuJiacong/PIDNet.git
+'''
+class PagFM(nn.Module):
+    def __init__(self, in_channels, mid_channels, after_relu=True, with_channel=True, BatchNorm=nn.BatchNorm2d):
+        super(PagFM, self).__init__()
+        self.with_channel = with_channel
+        self.after_relu = after_relu
+        self.f_x = nn.Sequential(
+                                nn.Conv2d(in_channels, mid_channels, 
+                                          kernel_size=1, bias=False),
+                                BatchNorm(mid_channels)
+                                )
+        self.f_y = nn.Sequential(
+                                nn.Conv2d(in_channels, mid_channels, 
+                                          kernel_size=1, bias=False),
+                                BatchNorm(mid_channels)
+                                )
+        if with_channel:
+            self.up = nn.Sequential(
+                                    nn.Conv2d(mid_channels, in_channels, 
+                                              kernel_size=1, bias=False),
+                                    BatchNorm(in_channels)
+                                   )
+        if after_relu:
+            self.relu = nn.ReLU(inplace=True)
+
+        self.maxpool = LocalAttention(channels=mid_channels)
+
+        self.edge_enhance_in = EdgeEnhancer(in_channels, nn.BatchNorm2d, None)
+        self.edge_enhance_mid = EdgeEnhancer(mid_channels, nn.BatchNorm2d, None)
+
+    def forward(self, x, y): 
+        input_size = x.size()
+        y = self.edge_enhance_in(y)
+        x = self.edge_enhance_in(x)
+
+        if self.after_relu:
+            y = self.relu(y)
+            x = self.relu(x)
+        
+        y_q = self.f_y(y)
+        y_q = F.interpolate(y_q, size=[input_size[2], input_size[3]],
+                            mode='bilinear', align_corners=False)
+        x_k = self.f_x(x)
+
+        y_q = self.maxpool(y_q)
+        x_k = self.maxpool(x_k)
+
+        if self.with_channel:
+            sim_map = self.up(x_k * y_q)
+            sim_map = self.edge_enhance_in(sim_map)
+            sim_map = torch.sigmoid(sim_map)
+        else:
+            sim_map = torch.sum(x_k * y_q, dim=1).unsqueeze(1)
+            sim_map = torch.sigmoid(sim_map)
+        y = F.interpolate(y, size=[input_size[2], input_size[3]],
+                            mode='bilinear', align_corners=False)
+        
+        x_sim = x * (1 - sim_map)
+        y_sim = y * sim_map
+
+        z = x_sim + y_sim
+        z = self.edge_enhance_in(z)
+
+        # # 可视化
+        # # 将 output 从计算图中分离出来，并转换为 NumPy 数组
+        # output_x = sim_map.detach().cpu().numpy().squeeze()
+        # output_y = (1 - sim_map).detach().cpu().numpy().squeeze()
+        # x_sim = x_sim.detach().cpu().numpy().squeeze()
+        # y_sim = y_sim.detach().cpu().numpy().squeeze()
+
+        # # 显示原图和滤波后的图像
+        # plt.figure(figsize=(10, 5)) 
+        # plt.subplot(2, 4, 1)
+        # plt.title("dis sim map")
+        # plt.imshow(output_y, cmap='gray')
+
+        # plt.subplot(2, 4, 2)
+        # plt.title("sim map")
+        # plt.imshow(output_x, cmap='gray')
+
+        # plt.subplot(2, 4, 3)
+        # plt.title("x Image sim")
+        # plt.imshow(x_sim, cmap='gray')
+
+        # plt.subplot(2, 4, 4)
+        # plt.title("y Image sim")
+        # plt.imshow(y_sim, cmap='gray')
+
+        # # 将 output 从计算图中分离出来，并转换为 NumPy 数组
+        # output_np = z.detach().cpu().numpy().squeeze()
+        # x = x.detach().cpu().numpy().squeeze()
+        # y = y.detach().cpu().numpy().squeeze()
+
+
+        # # 显示原图和滤波后的图像
+        # plt.subplot(2, 4, 5)
+        # plt.title("Original vis Image")
+        # plt.imshow(x, cmap='gray')
+
+        # plt.subplot(2, 4, 6)
+        # plt.title("Original trans Image")
+        # plt.imshow(y, cmap='gray')
+
+        # plt.subplot(2, 4, 7)
+        # plt.title("Fusion Image")
+        # plt.imshow(output_np, cmap='gray')
+
+        # plt.show()
+
+        return z
+
+''' Multi-Scale and Detail-Enhanced Segment Anything Model for Salient Object Detection
+    https://github.com/BellyBeauty/MDSAM.git
+'''
+class MEEM(nn.Module):
+    def __init__(self, in_dim, hidden_dim, width, norm, act):
+        super().__init__()
+        self.in_dim = in_dim
+        self.hidden_dim = hidden_dim
+        self.width = width
+        self.in_conv = nn.Sequential(
+            nn.Conv2d(in_dim, hidden_dim, 1, bias = False),
+            norm(hidden_dim),
+            nn.Sigmoid()
+        )
+
+        self.pool = nn.AvgPool2d(3, stride= 1,padding = 1)
+
+        self.mid_conv = nn.ModuleList()
+        self.edge_enhance = nn.ModuleList()
+        for i in range(width - 1):
+            self.mid_conv.append(nn.Sequential(
+                nn.Conv2d(hidden_dim, hidden_dim, 1, bias = False),
+                norm(hidden_dim),
+                nn.Sigmoid()
+            ))
+            self.edge_enhance.append(EdgeEnhancer(hidden_dim, norm, act))
+
+        self.out_conv = nn.Sequential(
+            nn.Conv2d(hidden_dim * width, in_dim, 1, bias = False),
+            norm(in_dim),
+            act()
+        )
+    
+    def forward(self, x):
+        mid = self.in_conv(x)
+
+        out = mid
+        #print(out.shape)
+        
+        for i in range(self.width - 1):
+            mid = self.pool(mid)
+            mid = self.mid_conv[i](mid)
+
+            out = torch.cat([out, self.edge_enhance[i](mid)], dim = 1)
+        
+        out = self.out_conv(out)
+
+        return out
+
+class EdgeEnhancer(nn.Module):
+    def __init__(self, in_dim, norm, act):
+        super().__init__()
+        self.out_conv = nn.Sequential(
+            nn.Conv2d(in_dim, in_dim, 1, bias = False),
+            norm(in_dim),
+            nn.Sigmoid()
+        )
+        self.pool = nn.AvgPool2d(3, stride= 1, padding = 1)
+    
+    def forward(self, x):
+        edge = self.pool(x)
+        edge = x - edge
+        edge = self.out_conv(edge)
+        return x + edge
+    
+class DetailEnhancement(nn.Module):
+    def __init__(self, img_dim, feature_dim, norm, act):
+        super().__init__()
+        self.img_in_conv = nn.Sequential(
+            nn.Conv2d(3, img_dim, 3, padding = 1, bias = False),
+            norm(img_dim),
+            act()
+        )
+        self.img_er = MEEM(img_dim, img_dim  // 2, 4, norm, act)
+
+        self.fusion_conv = nn.Sequential(
+            nn.Conv2d(feature_dim + img_dim, 32, 3, padding = 1, bias = False),
+            norm(32),
+            act(),
+            nn.Conv2d(32, 16, 3, padding = 1, bias = False),
+            norm(16),
+            act(),
+        )
+
+        self.out_conv = nn.Conv2d(16, 1, 1)
+        
+        self.feature_upsample = nn.Sequential(
+            nn.Conv2d(feature_dim * 2, feature_dim, 3, padding = 1, bias = False),
+            norm(feature_dim),
+            act(),
+            nn.Upsample(scale_factor = 2, mode = 'bilinear', align_corners = False),
+            nn.Conv2d(feature_dim, feature_dim, 3, padding = 1, bias = False),
+            norm(feature_dim),
+            act(),
+            nn.Upsample(scale_factor = 2, mode = 'bilinear', align_corners = False),
+            nn.Conv2d(feature_dim, feature_dim, 3, padding = 1, bias = False),
+            norm(feature_dim),
+            act(),
+        )
+    
+    def forward(self, img, feature, b_feature):
+
+        feature = torch.cat([feature, b_feature], dim = 1)
+        feature = self.feature_upsample(feature)
+
+        img_feature = self.img_in_conv(img)
+        img_feature = self.img_er(img_feature) + img_feature
+
+        out_feature = torch.cat([feature, img_feature], dim = 1)
+        out_feature = self.fusion_conv(out_feature)
+        out = self.out_conv(out_feature)
+
+        return out
+
+
+''' Adaptive Medical Image Fusion Based on Spatial-Frequential Cross Attention (AdaFuse)
+    https://github.com/xianming-gu/AdaFuse.git
+'''
 class ConvBlock_down(nn.Module):
     def __init__(self, in_channels, hid_channels, out_channels, kernel_size=3, stride=1, padding=1, if_down=True):
         super(ConvBlock_down, self).__init__()
@@ -124,7 +465,6 @@ class Block(nn.Module):
     def forward(self, x):
         x = self.norm1(x)
         attn, q, k, v = self.attn(x)
-
         # x = x + self.drop_path(attn(self.norm1(x)))
         # x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x, q, k, v
@@ -240,6 +580,7 @@ class TransCAF(nn.Module):
         attn2 = self.attn_drop(attn2)
 
         # cross attention
+
         x_attn1 = (attn1 @ v2).transpose(1, 2).reshape(B, N, C)
         x_attn1 = self.proj1(x_attn1)
         x_attn1 = self.proj_drop1(x_attn1)
@@ -250,31 +591,19 @@ class TransCAF(nn.Module):
 
         x_attn = (x_attn1 + x_attn2) / 2
 
-        print("x_attn: ", x_attn.shape)
-
         # Patch Rearrange
         ori = in_2.shape  # b,c,h,w
         out1 = self.depatch(x_attn, ori)
 
-        # out = in_1 + in_2 + out1
+        out = in_1 + in_2 + out1
 
-        return out1
+        return out
     
 class CAF(nn.Module):
     def __init__(self, patch_size, dim, num_heads, channel, proj_drop, depth, qk_scale, attn_drop):
         super(CAF, self).__init__()
 
         self.patchembed1 = PatchEmbed(patch_size=patch_size, in_c=channel, embed_dim=dim)
-        self.patchembed2 = PatchEmbed(patch_size=patch_size, in_c=channel, embed_dim=dim)
-
-        self.TransformerEncoderBlocks1 = nn.Sequential(*[
-            TransformerEncoderBlock(dim=dim, num_heads=num_heads)
-            for i in range(depth)
-        ])
-        self.TransformerEncoderBlocks2 = nn.Sequential(*[
-            TransformerEncoderBlock(dim=dim, num_heads=num_heads)
-            for i in range(depth)
-        ])
 
         self.QKV_Block1 = Block(dim=dim, num_heads=num_heads)
         self.QKV_Block2 = Block(dim=dim, num_heads=num_heads)
@@ -294,39 +623,49 @@ class CAF(nn.Module):
 
     def forward(self, in_1, in_2):
         # pure cross attention fusion
-        # 将特征图展平并调整维度顺序
-        batch_size, channels, height, width = in_1.shape
-        num_patches = height * width
-        embedding_dim = channels
+        # # 将特征图展平并调整维度顺序
+        # batch_size, channels, height, width = in_1.shape
+        # num_patches = height * width
+        # embedding_dim = channels
 
-        # 重新排列为 [batch_size, num_patches, embedding_dim]
-        reshaped_1 = rearrange(in_1, 'b c h w -> b (h w) c')
-        reshaped_2 = rearrange(in_2, 'b c h w -> b (h w) c')
+        # # 重新排列为 [batch_size, num_patches, embedding_dim]
+        # reshaped_1 = rearrange(in_1, 'b c h w -> b (h w) c')
+        # reshaped_2 = rearrange(in_2, 'b c h w -> b (h w) c')
 
-        _, q1, k1, v1 = self.QKV_Block1(reshaped_1)
+
+        # Patch Embeding1
+        in_emb1 = self.patchembed1(in_1)
+        in_emb2 = self.patchembed1(in_2)
+        B, N, C = in_emb1.shape
+        input1 = in_emb1
+        _, q1, k1, v1 = self.QKV_Block1(in_emb1)
 
         attn1 = (q1 @ k1.transpose(-2, -1)) * self.scale
         attn1 = attn1.softmax(dim=-1)
         attn1 = self.attn_drop(attn1)
 
-        _, q2, k2, v2 = self.QKV_Block2(reshaped_2)
+        _, q2, k2, v2 = self.QKV_Block2(in_emb2)
 
         attn2 = (q2 @ k2.transpose(-2, -1)) * self.scale
         attn2 = attn2.softmax(dim=-1)
         attn2 = self.attn_drop(attn2)
 
-        x_attn1 = (attn1 @ v2).transpose(1, 2).reshape(batch_size, num_patches, embedding_dim)
+        x_attn1 = (attn1 @ v2).transpose(1, 2).reshape(B, N, C)
         x_attn1 = self.proj1(x_attn1)
         x_attn1 = self.proj_drop1(x_attn1)
 
-        x_attn2 = (attn2 @ v1).transpose(1, 2).reshape(batch_size, num_patches, embedding_dim)
+        x_attn2 = (attn2 @ v1).transpose(1, 2).reshape(B, N, C)
         x_attn2 = self.proj2(x_attn2)
         x_attn2 = self.proj_drop2(x_attn2)
 
         x_attn = (x_attn1 + x_attn2) / 2
 
-        # 恢复原始形状 [batch_size, channels, height, width]
-        out1 = rearrange(x_attn, 'b (h w) c -> b c h w', h=height, w=width)
+        # # 恢复原始形状 [batch_size, channels, height, width]
+        # out1 = rearrange(x_attn, 'b (h w) c -> b c h w', h=height, w=width)
+
+        # Patch Rearrange
+        ori = in_2.shape  # b,c,h,w
+        out1 = self.depatch(x_attn, ori)
 
         # out = in_1 + in_2 + out1
 
@@ -355,10 +694,10 @@ class TransformerEncoderBlock(nn.Module):
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
 
-class sff(nn.Module):
-    def __init__(self, patch_size=16, dim=256, num_heads=8, channels=256, fusionblock_depth=3,
+class TransSFF(nn.Module):
+    def __init__(self, patch_size=16, dim=256, num_heads=8, channels=512, fusionblock_depth=3,
                  qk_scale=None, attn_drop=0., proj_drop=0., img_size=256):
-        super(sff, self).__init__()
+        super(TransSFF, self).__init__()
 
         # Fusion Block
         self.FusionBlock1 = TransCAF(patch_size=patch_size, dim=dim, num_heads=num_heads, channel=channels,
@@ -368,6 +707,48 @@ class sff(nn.Module):
                                 proj_drop=proj_drop, depth=fusionblock_depth, qk_scale=qk_scale,
                                 attn_drop=attn_drop)
         self.FusionBlock_final = TransCAF(patch_size=patch_size, dim=dim, num_heads=num_heads,
+                                     channel=channels,
+                                     proj_drop=proj_drop, depth=fusionblock_depth, qk_scale=qk_scale,
+                                     attn_drop=attn_drop)
+
+        self.conv1x1 = nn.Conv2d(1, 1, 1)
+
+    def forward(self, img1, img2):
+        x = img1
+        y = img2
+
+        y_f = torch.fft.fft2(y)  # Fourier Transform
+        y_f = torch.fft.fftshift(y_f)
+        y_f = torch.log(1 + torch.abs(y_f))
+
+        x_f = torch.fft.fft2(x)
+        x_f = torch.fft.fftshift(x_f)
+        x_f = torch.log(1 + torch.abs(x_f))
+
+        feature_y = self.FusionBlock1(x_f, y_f)
+        feature_x = self.FusionBlock2(x, y)
+
+        feature_y = torch.fft.ifftshift(feature_y)
+        feature_y = torch.fft.ifft2(feature_y)
+        feature_y = torch.abs(feature_y)
+
+        z = self.FusionBlock_final(feature_x, feature_y)
+
+        return z
+    
+class SFF(nn.Module):
+    def __init__(self, patch_size=16, dim=256, num_heads=8, channels=256, fusionblock_depth=3,
+                 qk_scale=None, attn_drop=0., proj_drop=0., img_size=256):
+        super(SFF, self).__init__()
+
+        # Fusion Block
+        self.FusionBlock1 = CAF(patch_size=patch_size, dim=dim, num_heads=num_heads, channel=channels,
+                                proj_drop=proj_drop, depth=fusionblock_depth, qk_scale=qk_scale,
+                                attn_drop=attn_drop)
+        self.FusionBlock2 = CAF(patch_size=patch_size, dim=dim, num_heads=num_heads, channel=channels,
+                                proj_drop=proj_drop, depth=fusionblock_depth, qk_scale=qk_scale,
+                                attn_drop=attn_drop)
+        self.FusionBlock_final = CAF(patch_size=patch_size, dim=dim, num_heads=num_heads,
                                      channel=channels,
                                      proj_drop=proj_drop, depth=fusionblock_depth, qk_scale=qk_scale,
                                      attn_drop=attn_drop)
@@ -410,22 +791,22 @@ class adafuse(nn.Module):
         # self.conv_up1 = ConvBlock_up(112 * 2, 8, 16, if_up=False)
 
         # Fusion Block
-        self.fusionnet1 = sff(patch_size=patch_size, dim=dim, num_heads=num_heads,
+        self.fusionnet1 = TransSFF(patch_size=patch_size, dim=dim, num_heads=num_heads,
                               channels=channels[0],
                               fusionblock_depth=fusionblock_depth[0],
                               qk_scale=qk_scale, attn_drop=attn_drop,
                               proj_drop=proj_drop)
-        self.fusionnet2 = sff(patch_size=patch_size, dim=dim, num_heads=num_heads,
+        self.fusionnet2 = TransSFF(patch_size=patch_size, dim=dim, num_heads=num_heads,
                               channels=channels[1],
                               fusionblock_depth=fusionblock_depth[1],
                               qk_scale=qk_scale, attn_drop=attn_drop,
                               proj_drop=proj_drop)
-        self.fusionnet3 = sff(patch_size=patch_size, dim=dim, num_heads=num_heads,
+        self.fusionnet3 = TransSFF(patch_size=patch_size, dim=dim, num_heads=num_heads,
                               channels=channels[2],
                               fusionblock_depth=fusionblock_depth[2],
                               qk_scale=qk_scale, attn_drop=attn_drop,
                               proj_drop=proj_drop)
-        self.fusionnet4 = sff(patch_size=patch_size, dim=dim, num_heads=num_heads,
+        self.fusionnet4 = TransSFF(patch_size=patch_size, dim=dim, num_heads=num_heads,
                               channels=channels[3],
                               fusionblock_depth=fusionblock_depth[3],
                               qk_scale=qk_scale, attn_drop=attn_drop,
@@ -437,10 +818,6 @@ class adafuse(nn.Module):
     def forward(self, img1, img2):
         x1, x2, x3, x4 = self.encoder(img1)
         y1, y2, y3, y4 = self.encoder(img2)
-        print(x1.shape, y1.shape)
-        print(x2.shape, y2.shape)
-        print(x3.shape, y3.shape)
-        print(x4.shape, y4.shape)
 
         z1 = self.fusionnet1(x1, y1)
         z2 = self.fusionnet2(x2, y2)
@@ -600,7 +977,7 @@ class ResNet_SFF(nn.Module):
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
-        self.sff = sff(patch_size=16, dim=256, num_heads=8, channels=512, fusionblock_depth=3,
+        self.sff = SFF(patch_size=16, dim=256, num_heads=8, channels=512, fusionblock_depth=3,
                  qk_scale=None, attn_drop=0., proj_drop=0., img_size=256)
 
     def _make_layer(self, block, out_channels, num_blocks, stride):
@@ -649,7 +1026,151 @@ class ResNet_SFF(nn.Module):
 
         return output
 
+class ResNet_TransSFF(nn.Module):
 
+    def __init__(self, block, num_block, num_classes=100):
+        super().__init__()
+
+        self.in_channels = 64
+
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True))
+        #we use a different inputsize than the original paper
+        #so conv2_x's stride is 1
+        self.conv2_x = self._make_layer(block, 64, num_block[0], 1)
+        self.conv3_x = self._make_layer(block, 128, num_block[1], 2)
+        self.conv4_x = self._make_layer(block, 256, num_block[2], 2)
+        self.conv5_x = self._make_layer(block, 512, num_block[3], 2)
+        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(512 * block.expansion, num_classes)
+
+        self.sff = TransSFF(patch_size=16, dim=256, num_heads=8, channels=512, fusionblock_depth=4,
+                 qk_scale=None, attn_drop=0., proj_drop=0., img_size=256)
+
+        # self.caf = CAF(patch_size=16, dim=512, num_heads=8, channel=512, depth=3,
+        #          qk_scale=None, attn_drop=0., proj_drop=0.)
+
+    def _make_layer(self, block, out_channels, num_blocks, stride):
+        """make resnet layers(by layer i didnt mean this 'layer' was the
+        same as a neuron netowork layer, ex. conv layer), one layer may
+        contain more than one residual block
+
+        Args:
+            block: block type, basic block or bottle neck block
+            out_channels: output depth channel number of this layer
+            num_blocks: how many blocks per layer
+            stride: the stride of the first block of this layer
+
+        Return:
+            return a resnet layer
+        """
+
+        # we have num_block blocks per layer, the first block
+        # could be 1 or 2, other blocks would always be 1
+        strides = [stride] + [1] * (num_blocks - 1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_channels, out_channels, stride))
+            self.in_channels = out_channels * block.expansion
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x, y):
+        x1 = self.conv1(x)
+        x2 = self.conv2_x(x1)
+        x3 = self.conv3_x(x2)
+        x4 = self.conv4_x(x3)
+        x5 = self.conv5_x(x4)
+
+        y1 = self.conv1(y)
+        y2 = self.conv2_x(y1)
+        y3 = self.conv3_x(y2)
+        y4 = self.conv4_x(y3)
+        y5 = self.conv5_x(y4)
+
+        output = self.sff(x5, y5)
+
+        output = self.avg_pool(output)
+        output = output.view(output.size(0), -1)
+        output = self.fc(output)
+
+        return output
+    
+
+class ResNet_SFF(nn.Module):
+
+    def __init__(self, block, num_block, num_classes=100):
+        super().__init__()
+
+        self.in_channels = 64
+
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True))
+        #we use a different inputsize than the original paper
+        #so conv2_x's stride is 1
+        self.conv2_x = self._make_layer(block, 64, num_block[0], 1)
+        self.conv3_x = self._make_layer(block, 128, num_block[1], 2)
+        self.conv4_x = self._make_layer(block, 256, num_block[2], 2)
+        self.conv5_x = self._make_layer(block, 512, num_block[3], 2)
+        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(512 * block.expansion, num_classes)
+
+        self.sff = SFF(patch_size=16, dim=256, num_heads=8, channels=512, fusionblock_depth=3,
+                 qk_scale=None, attn_drop=0., proj_drop=0., img_size=256)
+
+        # self.caf = CAF(patch_size=16, dim=512, num_heads=8, channel=512, depth=3,
+        #          qk_scale=None, attn_drop=0., proj_drop=0.)
+
+    def _make_layer(self, block, out_channels, num_blocks, stride):
+        """make resnet layers(by layer i didnt mean this 'layer' was the
+        same as a neuron netowork layer, ex. conv layer), one layer may
+        contain more than one residual block
+
+        Args:
+            block: block type, basic block or bottle neck block
+            out_channels: output depth channel number of this layer
+            num_blocks: how many blocks per layer
+            stride: the stride of the first block of this layer
+
+        Return:
+            return a resnet layer
+        """
+
+        # we have num_block blocks per layer, the first block
+        # could be 1 or 2, other blocks would always be 1
+        strides = [stride] + [1] * (num_blocks - 1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_channels, out_channels, stride))
+            self.in_channels = out_channels * block.expansion
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x, y):
+        x1 = self.conv1(x)
+        x2 = self.conv2_x(x1)
+        x3 = self.conv3_x(x2)
+        x4 = self.conv4_x(x3)
+        x5 = self.conv5_x(x4)
+
+        y1 = self.conv1(y)
+        y2 = self.conv2_x(y1)
+        y3 = self.conv3_x(y2)
+        y4 = self.conv4_x(y3)
+        y5 = self.conv5_x(y4)
+
+        output = self.sff(x5, y5)
+
+        output = self.avg_pool(output)
+        output = output.view(output.size(0), -1)
+        output = self.fc(output)
+
+        return output
+    
 class ResNet_CAF(nn.Module):
 
     def __init__(self, block, num_block, num_classes=100):
@@ -670,7 +1191,7 @@ class ResNet_CAF(nn.Module):
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
-        self.caf = CAF(patch_size=16, dim=512, num_heads=8, channel=512, depth=3,
+        self.caf = CAF(patch_size=16, dim=256, num_heads=8, channel=512, depth=4,
                  qk_scale=None, attn_drop=0., proj_drop=0.)
 
     def _make_layer(self, block, out_channels, num_blocks, stride):
@@ -711,7 +1232,92 @@ class ResNet_CAF(nn.Module):
         y4 = self.conv4_x(y3)
         y5 = self.conv5_x(y4)
 
+        # y_f = torch.fft.fft2(y5)  # Fourier Transform
+        # y_f = torch.fft.fftshift(y_f)
+        # y_f = torch.log(1 + torch.abs(y_f))
+
+        # x_f = torch.fft.fft2(x5)
+        # x_f = torch.fft.fftshift(x_f)
+        # x_f = torch.log(1 + torch.abs(x_f))
+
         output = self.caf(x5, y5)
+
+        # output = torch.fft.ifftshift(output)
+        # output = torch.fft.ifft2(output)
+        # output = torch.abs(output)
+
+
+        output = self.avg_pool(output)
+        output = output.view(output.size(0), -1)
+        output = self.fc(output)
+
+        return output
+    
+class ResNet_PagFM(nn.Module):
+
+    def __init__(self, block, num_block, num_classes=100):
+        super().__init__()
+
+        self.in_channels = 64
+
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True))
+        #we use a different inputsize than the original paper
+        #so conv2_x's stride is 1
+        self.conv2_x = self._make_layer(block, 64, num_block[0], 1)
+        self.conv3_x = self._make_layer(block, 128, num_block[1], 2)
+        self.conv4_x = self._make_layer(block, 256, num_block[2], 2)
+        self.conv5_x = self._make_layer(block, 512, num_block[3], 2)
+        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(512 * block.expansion, num_classes)
+
+        self.pagfm = PagFM(in_channels=512, mid_channels=512)
+
+    def _make_layer(self, block, out_channels, num_blocks, stride):
+        """make resnet layers(by layer i didnt mean this 'layer' was the
+        same as a neuron netowork layer, ex. conv layer), one layer may
+        contain more than one residual block
+
+        Args:
+            block: block type, basic block or bottle neck block
+            out_channels: output depth channel number of this layer
+            num_blocks: how many blocks per layer
+            stride: the stride of the first block of this layer
+
+        Return:
+            return a resnet layer
+        """
+
+        # we have num_block blocks per layer, the first block
+        # could be 1 or 2, other blocks would always be 1
+        strides = [stride] + [1] * (num_blocks - 1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_channels, out_channels, stride))
+            self.in_channels = out_channels * block.expansion
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x, y):
+        '''
+            x: vis image
+            y: trans image
+        '''
+        x1 = self.conv1(x)
+        x2 = self.conv2_x(x1)
+        x3 = self.conv3_x(x2)
+        x4 = self.conv4_x(x3)
+        x5 = self.conv5_x(x4)
+
+        y1 = self.conv1(y)
+        y2 = self.conv2_x(y1)
+        y3 = self.conv3_x(y2)
+        y4 = self.conv4_x(y3)
+        y5 = self.conv5_x(y4)
+
+        output = self.pagfm(x5, y5)
 
         output = self.avg_pool(output)
         output = output.view(output.size(0), -1)
@@ -719,16 +1325,26 @@ class ResNet_CAF(nn.Module):
 
         return output
 
-def resnet18_sff():
-    """ return a ResNet 18 object
-    """
-    return ResNet_SFF(BasicBlock, [2, 2, 2, 2])
 
 def resnet18_caf():
     """ return a ResNet 18 object
     """
     return ResNet_CAF(BasicBlock, [2, 2, 2, 2])
 
+def resnet18_sff():
+    """ return a ResNet 18 object
+    """
+    return ResNet_SFF(BasicBlock, [2, 2, 2, 2])
+
+def resnet18_trans_sff():
+    """ return a ResNet 18 object
+    """
+    return ResNet_TransSFF(BasicBlock, [2, 2, 2, 2])
+
+def resnet18_pag():
+    """ return a ResNet 18 object
+    """
+    return ResNet_PagFM(BasicBlock, [2, 2, 2, 2])
 def resnet34():
     """ return a ResNet 34 object
     """
@@ -751,10 +1367,19 @@ def resnet152():
 
 
 if __name__ == "__main__":
-    img1 = torch.randn(32, 3, 256, 256)
-    img2 = torch.randn(32, 3, 256, 256)
+    img1 = torch.randn(1, 3, 256, 256)
+    img2 = torch.randn(1, 3, 256, 256)
+    fidx_u = [0, 1]
+    fidx_v = [0, 1]
 
-    net = resnet18_sff()
+    # net = FACMA(in_channel=3, width=256, height=256, fidx_u=fidx_u, fidx_v=fidx_v)
+    # out_rgb, out_d = net(img1, img2)
+
+    # net = MEEM(in_dim=3, hidden_dim=6)
+    # net = PatchEmbed(in_c=512)
+    # net = PagFM(in_channels=3, mid_channels=64, with_channel=False)
+    net = resnet18_pag()
+    
 
     torchinfo.summary(net, input_data=(img1, img2))
 
