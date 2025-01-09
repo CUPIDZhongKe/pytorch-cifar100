@@ -17,7 +17,7 @@ CIFAR100_TRAIN_STD = (0.2673342858792401, 0.2564384629170883, 0.2761504713256840
 
 #directory to save weights file
 # CHECKPOINT_PATH = '/classification/data/results/checkpoint'
-CHECKPOINT_PATH = '/classification/data/results/checkpoint'
+CHECKPOINT_PATH = '/zk/printer/results/checkpoint'
 
 #total training epoches
 EPOCH = 200
@@ -32,7 +32,7 @@ TIME_NOW = datetime.now().strftime(DATE_FORMAT)
 
 #tensorboard log dir
 # LOG_DIR = '/classification/data/results/runs'
-LOG_DIR = '/classification/data/results/runs'
+LOG_DIR = '/zk/printer/results/runs'
 
 #save weights file per SAVE_EPOCH epoch
 SAVE_EPOCH = 10
