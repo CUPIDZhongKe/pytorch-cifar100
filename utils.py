@@ -184,6 +184,9 @@ def get_network(args):
     elif args.net == 'resnet18-pag':
         from models.cafresnet import resnet18_pag
         net = resnet18_pag()
+    elif args.net == 'resnet18-pag-pretrain':
+        from models.cafresnet import resnet18_pag_pretrain
+        net = resnet18_pag_pretrain
     else:
         print('the network name you have entered is not supported yet')
         sys.exit()

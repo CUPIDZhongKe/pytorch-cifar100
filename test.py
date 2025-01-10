@@ -26,7 +26,7 @@ if __name__ == '__main__':
     parser.add_argument('-net', type=str, required=True, help='net type')
     parser.add_argument('-weights', type=str, required=True, help='the weights file you want to test')
     parser.add_argument('-gpu', action='store_true', default=False, help='use gpu or not')
-    parser.add_argument('-datadir', type=str, default='./data', help='the path of data')
+    parser.add_argument('-datadir', type=str, default='F:\\datasets', help='the path of data')
     parser.add_argument('-batchsize', type=int, default=32, help='batch size for dataloader')
     args = parser.parse_args()
 
@@ -36,22 +36,22 @@ if __name__ == '__main__':
     mean = [0.0, 0.0]
     std = [0.0, 0.0]
     mean[0], std[0] = calculate_mean_std(
-        os.path.join(args.datadir, 'docDataset_vis')
+        os.path.join(args.datadir, 'visset')
     )
     mean[1], std[1] = calculate_mean_std(
-        os.path.join(args.datadir, 'docDataset_trans')
+        os.path.join(args.datadir, 'transset')
     )
     #data preprocessing:
     _, test_loader = get_paired_dataloaders(
-        os.path.join(args.datadir, 'docDataset_vis'),
-        os.path.join(args.datadir, 'docDataset_trans'),
+        os.path.join(args.datadir, 'visset'),
+        os.path.join(args.datadir, 'transset'),
         mean, 
         std, 
-        num_workers=1,  # 增加 num_workers
+        num_workers=8,  # 增加 num_workers
         batch_size=32,
         shuffle=True,
         pin_memory=True,  # 使用 pin_memory
-        test_size=0.3  # 设置测试集比例
+        test_size=0.5  # 设置测试集比例
     )   
 
 

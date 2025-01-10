@@ -146,15 +146,15 @@ if __name__ == '__main__':
     mean = [0.0, 0.0]
     std = [0.0, 0.0]
     mean[0], std[0] = calculate_mean_std(
-        os.path.join(args.datadir, 'docDataset_vis')
+        os.path.join(args.datadir, 'vis/train')
     )
     mean[1], std[1] = calculate_mean_std(
-        os.path.join(args.datadir, 'docDataset_trans')
+        os.path.join(args.datadir, 'trans/train')
     )
     #data preprocessing:
     training_loader, test_loader = get_paired_dataloaders(
-        os.path.join(args.datadir, 'docDataset_vis'),
-        os.path.join(args.datadir, 'docDataset_trans'),
+        os.path.join(args.datadir, 'vis/train'),
+        os.path.join(args.datadir, 'trans/train'),
         mean, 
         std, 
         num_workers=8,  # 增加 num_workers
@@ -188,8 +188,8 @@ if __name__ == '__main__':
 
     loss_function = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
-    train_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=settings.MILESTONES, gamma=0.2) #learning rate decay
-
+    # train_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=settings.MILESTONES, gamma=0.2) #learning rate decay
+    train_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=settings.EPOCH, eta_min=0)
     # # 创建 Adam 优化器
     # optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=5e-4)
     # # 使用 ReduceLROnPlateau 作为学习率调度器

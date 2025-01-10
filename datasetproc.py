@@ -303,47 +303,112 @@ def move_and_rename_images(input_folder, output_folder):
             print(f"Copy and renamed {filename} to {new_filename}")
 
 
+import os
+import shutil
+import re
+
+import os
+import shutil
+import re
+
+def copy_images_by_y_value(input_folder, output_folder_A, output_folder_B):
+    # 确保输出文件夹存在
+    os.makedirs(output_folder_A, exist_ok=True)
+    os.makedirs(output_folder_B, exist_ok=True)
+
+    # 读取输入文件夹中的所有图片文件
+    filenames = os.listdir(input_folder)
+    image_dict = {}
+
+    # 根据 y 值对图片进行分组
+    for filename in filenames:
+        match = re.match(r"(\d+)_(\d+)_透射可见\.jpg", filename)
+        if match:
+            x, y = match.groups()
+            y = int(y)
+            if y not in image_dict:
+                image_dict[y] = []
+            image_dict[y].append(filename)
+
+    # 处理每个 y 值对应的图片
+    for y, filenames in image_dict.items():
+        # 确保有足够的图片
+        if len(filenames) < 30:
+            print(f"Warning: Not enough images for y={y}. Found {len(filenames)} images.")
+            continue
+
+        # 前 24 张图片复制到文件夹 A
+        for i in range(24):
+            src_path = os.path.join(input_folder, filenames[i])
+            dst_path = os.path.join(output_folder_A, filenames[i])
+            shutil.copy(src_path, dst_path)
+            print(f"Copied {src_path} to {dst_path}")
+
+        # 后 6 张图片复制到文件夹 B
+        for i in range(24, 30):
+            src_path = os.path.join(input_folder, filenames[i])
+            dst_path = os.path.join(output_folder_B, filenames[i])
+            shutil.copy(src_path, dst_path)
+            print(f"Copied {src_path} to {dst_path}")
+
+def copy_and_rename_images_by_y_value(input_folder, output_folder_A, output_folder_B):
+    # 确保输出文件夹存在
+    os.makedirs(output_folder_A, exist_ok=True)
+    os.makedirs(output_folder_B, exist_ok=True)
+
+    # 读取输入文件夹中的所有图片文件
+    filenames = os.listdir(input_folder)
+    image_dict = {}
+
+    # 根据 y 值对图片进行分组
+    for filename in filenames:
+        match = re.match(r"(\d+)_(\d+)_透视可见\.jpg", filename)
+        if match:
+            x, y = match.groups()
+            y = int(y)
+            if y not in image_dict:
+                image_dict[y] = []
+            image_dict[y].append((filename, int(x)))
+
+    # 处理每个 y 值对应的图片
+    for y, file_x_pairs in image_dict.items():
+        # 按 x 值排序
+        file_x_pairs.sort(key=lambda pair: pair[1])
+
+        filenames = [pair[0] for pair in file_x_pairs]
+        x_values = [pair[1] for pair in file_x_pairs]
+
+        # 确保有足够的图片
+        if len(filenames) < 30:
+            print(f"Warning: Not enough images for y={y}. Found {len(filenames)} images.")
+            continue
+
+        # 前 24 张图片复制到文件夹 A，并重命名
+        for i in range(24):
+            src_path = os.path.join(input_folder, filenames[i])
+            x_value = x_values[i]
+            new_x_value = x_value + 720
+            new_y_value = y + 30
+            new_filename = f"{new_x_value}_{new_y_value}_透视可见.jpg"
+            dst_path = os.path.join(output_folder_A, new_filename)
+            shutil.copy(src_path, dst_path)
+            print(f"Copied and renamed {src_path} to {dst_path}")
+
+        # 后 6 张图片复制到文件夹 B，并重命名
+        for i in range(24, 30):
+            src_path = os.path.join(input_folder, filenames[i])
+            x_value = x_values[i]
+            new_x_value = x_value + 180
+            new_y_value = y + 30
+            new_filename = f"{new_x_value}_{new_y_value}_透视可见.jpg"
+            dst_path = os.path.join(output_folder_B, new_filename)
+            shutil.copy(src_path, dst_path)
+            print(f"Copied and renamed {src_path} to {dst_path}")
+
 if __name__ == "__main__":
     for i in range(1, 8):
-        # input_folder = rf"F:\datasets\docDataset\{i}\双面"
-        # output_folder = rf"F:\datasets\docDataset\{i}\patches"
-        # process_images(input_folder, output_folder)
-
-        # input_folder = rf"F:\datasets\docDataset\{i}\patches"
-        # output_folder_vis = rf"F:\datasets\docDataset\{i}\patches_vis_dual"
-        # output_folder_trans = rf"F:\datasets\docDataset\{i}\patches_trans_dual"
-        # move_images(input_folder, output_folder_vis, output_folder_trans)
-
-        # input_folder_vis = rf"F:\datasets\docDataset\{i}\patches_vis_dual"
-        # input_folder_trans = rf"F:\datasets\docDataset\{i}\patches_trans_dual"
-        # train_folder_trans = rf"F:\datasets\docDataset_twoside_trans\train\{i}"
-        # train_folder_vis = rf"F:\datasets\docDataset_twoside_vis\train\{i}"
-        # test_folder_trans = rf"F:\datasets\docDataset_twoside_trans\test\{i}"
-        # test_folder_vis = rf"F:\datasets\docDataset_twoside_vis\test\{i}"
-        # copy_images(input_folder_vis, train_folder_vis, test_folder_vis)
-        # copy_images(input_folder_trans, train_folder_trans, test_folder_trans)
-
-    #     folder_to_clean = rf"F:\datasets\docDataset\{i}\patches"
-    #     delete_all_files(folder_to_clean)
-        # folder_to_clean = rf"F:\datasets\docDataset\{i}\patches_vis_dual"
-        # delete_all_files(folder_to_clean)
-        # folder_to_clean = rf"F:\datasets\docDataset\{i}\patches_trans_dual"
-        # delete_all_files(folder_to_clean)
-        # input_folder_trans = r"F:\datasets\docDataset\docDataset_twoside_vis"
-        # input_folder_vis = r"F:\datasets\docDataset\docDataset_twoside_vis"
-        # delete_all_files(input_folder_vis)
-        # delete_all_files(input_folder_trans)
-
-        input_folder_path = rf"F:\datasets\docDataset_twoside_vis\train\{i}"
-        output_folder_path = rf"F:\datasets\docDataset_vis_mix\train\{i}"
-        move_and_rename_images(input_folder_path, output_folder_path)
-        input_folder_path = rf"F:\datasets\docDataset_twoside_vis\test\{i}"
-        output_folder_path = rf"F:\datasets\docDataset_vis_mix\test\{i}"
-        move_and_rename_images(input_folder_path, output_folder_path)
-
-        input_folder_path = rf"F:\datasets\docDataset_twoside_trans\train\{i}"
-        output_folder_path = rf"F:\datasets\docDataset_trans_mix\train\{i}"
-        move_and_rename_images(input_folder_path, output_folder_path)
-        input_folder_path = rf"F:\datasets\docDataset_twoside_trans\test\{i}"
-        output_folder_path = rf"F:\datasets\docDataset_trans_mix\test\{i}"
-        move_and_rename_images(input_folder_path, output_folder_path)
+        input_folder = rf"F:\datasets\docDataset\{i}\patches_trans"
+        output_folder_A = rf"F:\datasets\docDataset_trans\train\{i}"
+        output_folder_B = rf"F:\datasets\docDataset_trans\test\{i}"
+        # copy_images_by_y_value(input_folder, output_folder_A, output_folder_B)
+        copy_and_rename_images_by_y_value(input_folder, output_folder_A, output_folder_B)

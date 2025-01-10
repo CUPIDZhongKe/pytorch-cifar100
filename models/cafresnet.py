@@ -123,10 +123,11 @@ class LocalAttention(nn.Module):
     https://github.com/XuJiacong/PIDNet.git
 '''
 class PagFM(nn.Module):
-    def __init__(self, in_channels, mid_channels, after_relu=True, with_channel=True, BatchNorm=nn.BatchNorm2d):
+    def __init__(self, in_channels, mid_channels, fusion=True, after_relu=True, with_channel=True, BatchNorm=nn.BatchNorm2d):
         super(PagFM, self).__init__()
         self.with_channel = with_channel
         self.after_relu = after_relu
+        self.fusion = fusion
         self.f_x = nn.Sequential(
                                 nn.Conv2d(in_channels, mid_channels, 
                                           kernel_size=1, bias=False),
@@ -146,15 +147,10 @@ class PagFM(nn.Module):
         if after_relu:
             self.relu = nn.ReLU(inplace=True)
 
-        self.maxpool = LocalAttention(channels=mid_channels)
-
-        self.edge_enhance_in = EdgeEnhancer(in_channels, nn.BatchNorm2d, None)
-        self.edge_enhance_mid = EdgeEnhancer(mid_channels, nn.BatchNorm2d, None)
+        # self.facma = FACMA(in_channel=mid_channels, width=width, height=height, fidx_u=[0, 1, 2], fidx_v=[0, 1, 2])
 
     def forward(self, x, y): 
         input_size = x.size()
-        y = self.edge_enhance_in(y)
-        x = self.edge_enhance_in(x)
 
         if self.after_relu:
             y = self.relu(y)
@@ -165,12 +161,10 @@ class PagFM(nn.Module):
                             mode='bilinear', align_corners=False)
         x_k = self.f_x(x)
 
-        y_q = self.maxpool(y_q)
-        x_k = self.maxpool(x_k)
+        # x_k, y_q = self.facma(x_k, y_q)
 
         if self.with_channel:
             sim_map = self.up(x_k * y_q)
-            sim_map = self.edge_enhance_in(sim_map)
             sim_map = torch.sigmoid(sim_map)
         else:
             sim_map = torch.sum(x_k * y_q, dim=1).unsqueeze(1)
@@ -178,59 +172,69 @@ class PagFM(nn.Module):
         y = F.interpolate(y, size=[input_size[2], input_size[3]],
                             mode='bilinear', align_corners=False)
         
+        # 提取x和y的差异图
         x_sim = x * (1 - sim_map)
-        y_sim = y * sim_map
+        y_sim = y * (1 - sim_map)
 
-        z = x_sim + y_sim
-        z = self.edge_enhance_in(z)
+        if self.fusion:
+            z = (x_sim + y_sim)
+            return z
+        else:
+            # 差异图交叉相融
+            z = (x_sim + y)
+            w = (y_sim + x)
 
-        # # 可视化
-        # # 将 output 从计算图中分离出来，并转换为 NumPy 数组
-        # output_x = sim_map.detach().cpu().numpy().squeeze()
-        # output_y = (1 - sim_map).detach().cpu().numpy().squeeze()
-        # x_sim = x_sim.detach().cpu().numpy().squeeze()
-        # y_sim = y_sim.detach().cpu().numpy().squeeze()
+            # # 可视化
+            # # 将 output 从计算图中分离出来，并转换为 NumPy 数组
+            # output_x = sim_map.detach().cpu().numpy().squeeze()
+            # output_y = (1 - sim_map).detach().cpu().numpy().squeeze()
+            # x_sim = x_sim.detach().cpu().numpy().squeeze()
+            # y_sim = y_sim.detach().cpu().numpy().squeeze()
 
-        # # 显示原图和滤波后的图像
-        # plt.figure(figsize=(10, 5)) 
-        # plt.subplot(2, 4, 1)
-        # plt.title("dis sim map")
-        # plt.imshow(output_y, cmap='gray')
+            # # 显示原图和滤波后的图像
+            # plt.figure(figsize=(10, 5)) 
+            # plt.subplot(2, 4, 1)
+            # plt.title("dis sim map")
+            # plt.imshow(output_y, cmap='gray')
 
-        # plt.subplot(2, 4, 2)
-        # plt.title("sim map")
-        # plt.imshow(output_x, cmap='gray')
+            # plt.subplot(2, 4, 2)
+            # plt.title("sim map")
+            # plt.imshow(output_x, cmap='gray')
 
-        # plt.subplot(2, 4, 3)
-        # plt.title("x Image sim")
-        # plt.imshow(x_sim, cmap='gray')
+            # plt.subplot(2, 4, 3)
+            # plt.title("x Image sim")
+            # plt.imshow(x_sim, cmap='gray')
 
-        # plt.subplot(2, 4, 4)
-        # plt.title("y Image sim")
-        # plt.imshow(y_sim, cmap='gray')
+            # plt.subplot(2, 4, 4)
+            # plt.title("y Image sim")
+            # plt.imshow(y_sim, cmap='gray')
 
-        # # 将 output 从计算图中分离出来，并转换为 NumPy 数组
-        # output_np = z.detach().cpu().numpy().squeeze()
-        # x = x.detach().cpu().numpy().squeeze()
-        # y = y.detach().cpu().numpy().squeeze()
+            # # 将 output 从计算图中分离出来，并转换为 NumPy 数组
+            # output_np = z.detach().cpu().numpy().squeeze()
+            # output_w = w.detach().cpu().numpy().squeeze()
+            # x = x.detach().cpu().numpy().squeeze()
+            # y = y.detach().cpu().numpy().squeeze()
 
+            # # 显示原图和滤波后的图像
+            # plt.subplot(2, 4, 5)
+            # plt.title("Original vis Image")
+            # plt.imshow(x, cmap='gray')
 
-        # # 显示原图和滤波后的图像
-        # plt.subplot(2, 4, 5)
-        # plt.title("Original vis Image")
-        # plt.imshow(x, cmap='gray')
+            # plt.subplot(2, 4, 6)
+            # plt.title("Original trans Image")
+            # plt.imshow(y, cmap='gray')
 
-        # plt.subplot(2, 4, 6)
-        # plt.title("Original trans Image")
-        # plt.imshow(y, cmap='gray')
+            # plt.subplot(2, 4, 7)
+            # plt.title("Fusion Image")
+            # plt.imshow(output_np, cmap='gray')
 
-        # plt.subplot(2, 4, 7)
-        # plt.title("Fusion Image")
-        # plt.imshow(output_np, cmap='gray')
+            # plt.subplot(2, 4, 8)
+            # plt.title("Fusion Image")
+            # plt.imshow(output_w, cmap='gray')
 
-        # plt.show()
+            # plt.show()
 
-        return z
+            return w, z
 
 ''' Multi-Scale and Detail-Enhanced Segment Anything Model for Salient Object Detection
     https://github.com/BellyBeauty/MDSAM.git
@@ -1274,7 +1278,11 @@ class ResNet_PagFM(nn.Module):
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
-        self.pagfm = PagFM(in_channels=512, mid_channels=512)
+        self.pagfm_1 = PagFM(in_channels=64, mid_channels=32, fusion=False)
+        self.pagfm_2 = PagFM(in_channels=64, mid_channels=32, fusion=False)
+        self.pagfm_3 = PagFM(in_channels=128, mid_channels=64, fusion=False)
+        self.pagfm_4 = PagFM(in_channels=256, mid_channels=128, fusion=False)
+        self.pagfm_5 = PagFM(in_channels=512, mid_channels=256, fusion=True)
 
     def _make_layer(self, block, out_channels, num_blocks, stride):
         """make resnet layers(by layer i didnt mean this 'layer' was the
@@ -1307,18 +1315,24 @@ class ResNet_PagFM(nn.Module):
             y: trans image
         '''
         x1 = self.conv1(x)
-        x2 = self.conv2_x(x1)
-        x3 = self.conv3_x(x2)
-        x4 = self.conv4_x(x3)
-        x5 = self.conv5_x(x4)
-
         y1 = self.conv1(y)
-        y2 = self.conv2_x(y1)
-        y3 = self.conv3_x(y2)
-        y4 = self.conv4_x(y3)
-        y5 = self.conv5_x(y4)
+        x1, y1 = self.pagfm_1(x1, y1)
 
-        output = self.pagfm(x5, y5)
+        x2 = self.conv2_x(x1)
+        y2 = self.conv2_x(y1)
+        x2, y2 = self.pagfm_2(x2, y2)
+
+        x3 = self.conv3_x(x2)
+        y3 = self.conv3_x(y2)
+        x3, y3 = self.pagfm_3(x3, y3)
+
+        x4 = self.conv4_x(x3)
+        y4 = self.conv4_x(y3)
+        x4, y4 = self.pagfm_4(x4, y4)
+
+        x5 = self.conv5_x(x4)
+        y5 = self.conv5_x(y4)
+        output = self.pagfm_5(x5, y5)
 
         output = self.avg_pool(output)
         output = output.view(output.size(0), -1)
@@ -1341,17 +1355,21 @@ class ResNet_PagFM_Pretrain(nn.Module):
             resnet18.conv1,
             resnet18.bn1,
             resnet18.relu,
-            resnet18.maxpool,
-            resnet18.layer1,
-            resnet18.layer2,
-            resnet18.layer3,
-            resnet18.layer4
+            resnet18.maxpool
         )
+        self.layer1 = resnet18.layer1
+        self.layer2 = resnet18.layer2
+        self.layer3 = resnet18.layer3
+        self.layer4 = resnet18.layer4
 
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
-        self.pagfm = PagFM(in_channels=512, mid_channels=512)
+        self.pagfm_1 = PagFM(in_channels=64, mid_channels=32, fusion=False)
+        self.pagfm_2 = PagFM(in_channels=64, mid_channels=32, fusion=False)
+        self.pagfm_3 = PagFM(in_channels=128, mid_channels=64, fusion=False)
+        self.pagfm_4 = PagFM(in_channels=256, mid_channels=128, fusion=False)
+        self.pagfm_5 = PagFM(in_channels=512, mid_channels=256, fusion=True)
 
     def _make_layer(self, block, out_channels, num_blocks, stride):
         """make resnet layers(by layer i didnt mean this 'layer' was the
@@ -1385,8 +1403,23 @@ class ResNet_PagFM_Pretrain(nn.Module):
         '''
         x = self.features(x)
         y = self.features(y)
+        x, y = self.pagfm_1(x, y)
 
-        output = self.pagfm(x, y)
+        x = self.layer1(x)
+        y = self.layer1(y)
+        x, y = self.pagfm_2(x, y)
+
+        x = self.layer2(x)
+        y = self.layer2(y)
+        x, y = self.pagfm_3(x, y)
+
+        x = self.layer3(x)
+        y = self.layer3(y)
+        x, y = self.pagfm_4(x, y)
+
+        x = self.layer4(x)
+        y = self.layer4(y)
+        output = self.pagfm_5(x, y)
 
         output = self.avg_pool(output)
         output = output.view(output.size(0), -1)
@@ -1442,8 +1475,8 @@ def resnet152():
 if __name__ == "__main__":
     img1 = torch.randn(1, 3, 256, 256)
     img2 = torch.randn(1, 3, 256, 256)
-    fidx_u = [0, 1]
-    fidx_v = [0, 1]
+    # fidx_u = [0, 1]
+    # fidx_v = [0, 1]
 
     # net = FACMA(in_channel=3, width=256, height=256, fidx_u=fidx_u, fidx_v=fidx_v)
     # out_rgb, out_d = net(img1, img2)
@@ -1451,12 +1484,13 @@ if __name__ == "__main__":
     # net = MEEM(in_dim=3, hidden_dim=6)
     # net = PatchEmbed(in_c=512)
     # net = PagFM(in_channels=3, mid_channels=64, with_channel=False)
+    net = resnet18_pag_pretrain()
 
-    # z = net(img1, img2)
+    z = net(img1, img2)
 
     # print(z.shape)
 
-    net = resnet18_pag()
+    # net = resnet18_pag_pretrain()
     torchinfo.summary(net, input_data=(img1, img2))
 
 
