@@ -145,7 +145,7 @@ class PagFM(nn.Module):
                                     BatchNorm(in_channels)
                                    )
         if after_relu:
-            self.relu = nn.ReLU(inplace=True)
+            self.relu = nn.ReLU(inplace=False)
 
         # self.facma = FACMA(in_channel=mid_channels, width=width, height=height, fidx_u=[0, 1, 2], fidx_v=[0, 1, 2])
 
@@ -164,22 +164,22 @@ class PagFM(nn.Module):
         # x_k, y_q = self.facma(x_k, y_q)
 
         if self.with_channel:
-            sim_map = self.up(x_k * y_q)
-            sim_map = torch.sigmoid(sim_map)
+            sim_map = torch.sigmoid(self.up(x_k * y_q))
         else:
-            sim_map = torch.sum(x_k * y_q, dim=1).unsqueeze(1)
-            sim_map = torch.sigmoid(sim_map)
+            sim_map = torch.sigmoid(torch.sum(x_k * y_q, dim=1).unsqueeze(1))
         y = F.interpolate(y, size=[input_size[2], input_size[3]],
                             mode='bilinear', align_corners=False)
         
-        # 提取x和y的差异图
-        x_sim = x * (1 - sim_map)
-        y_sim = y * (1 - sim_map)
-
         if self.fusion:
-            z = (x_sim + y_sim)
+            # 提取x和y的差异图
+            x_sim = x * (1 - sim_map)
+            y_sim = y * sim_map
+            z = x_sim + y_sim
             return z
         else:
+            # 提取x和y的差异图
+            x_sim = x * (1 - sim_map)
+            y_sim = y * (1 - sim_map)
             # 差异图交叉相融
             z = (x_sim + y)
             w = (y_sim + x)
@@ -1280,8 +1280,8 @@ class ResNet_PagFM(nn.Module):
 
         self.pagfm_1 = PagFM(in_channels=64, mid_channels=32, fusion=False)
         self.pagfm_2 = PagFM(in_channels=64, mid_channels=32, fusion=False)
-        self.pagfm_3 = PagFM(in_channels=128, mid_channels=64, fusion=False)
-        self.pagfm_4 = PagFM(in_channels=256, mid_channels=128, fusion=False)
+        # self.pagfm_3 = PagFM(in_channels=128, mid_channels=64, fusion=False)
+        # self.pagfm_4 = PagFM(in_channels=256, mid_channels=128, fusion=False)
         self.pagfm_5 = PagFM(in_channels=512, mid_channels=256, fusion=True)
 
     def _make_layer(self, block, out_channels, num_blocks, stride):
@@ -1324,11 +1324,11 @@ class ResNet_PagFM(nn.Module):
 
         x3 = self.conv3_x(x2)
         y3 = self.conv3_x(y2)
-        x3, y3 = self.pagfm_3(x3, y3)
+        # x3, y3 = self.pagfm_3(x3, y3)
 
         x4 = self.conv4_x(x3)
         y4 = self.conv4_x(y3)
-        x4, y4 = self.pagfm_4(x4, y4)
+        # x4, y4 = self.pagfm_4(x4, y4)
 
         x5 = self.conv5_x(x4)
         y5 = self.conv5_x(y4)
@@ -1367,8 +1367,8 @@ class ResNet_PagFM_Pretrain(nn.Module):
 
         self.pagfm_1 = PagFM(in_channels=64, mid_channels=32, fusion=False)
         self.pagfm_2 = PagFM(in_channels=64, mid_channels=32, fusion=False)
-        self.pagfm_3 = PagFM(in_channels=128, mid_channels=64, fusion=False)
-        self.pagfm_4 = PagFM(in_channels=256, mid_channels=128, fusion=False)
+        # self.pagfm_3 = PagFM(in_channels=128, mid_channels=64, fusion=False)
+        # self.pagfm_4 = PagFM(in_channels=256, mid_channels=128, fusion=False)
         self.pagfm_5 = PagFM(in_channels=512, mid_channels=256, fusion=True)
 
     def _make_layer(self, block, out_channels, num_blocks, stride):
@@ -1401,25 +1401,25 @@ class ResNet_PagFM_Pretrain(nn.Module):
             x: vis image
             y: trans image
         '''
-        x = self.features(x)
-        y = self.features(y)
-        x, y = self.pagfm_1(x, y)
+        x1 = self.features(x)
+        y1 = self.features(y)
+        x1, y1 = self.pagfm_1(x1, y1)
 
-        x = self.layer1(x)
-        y = self.layer1(y)
-        x, y = self.pagfm_2(x, y)
+        x2 = self.layer1(x1)
+        y2 = self.layer1(y1)
+        x2, y2 = self.pagfm_2(x2, y2)
 
-        x = self.layer2(x)
-        y = self.layer2(y)
-        x, y = self.pagfm_3(x, y)
+        x3 = self.layer2(x2)
+        y3 = self.layer2(y2)
+        # x, y = self.pagfm_3(x, y)
 
-        x = self.layer3(x)
-        y = self.layer3(y)
-        x, y = self.pagfm_4(x, y)
+        x4 = self.layer3(x3)
+        y4 = self.layer3(y3)
+        # x, y = self.pagfm_4(x, y)
 
-        x = self.layer4(x)
-        y = self.layer4(y)
-        output = self.pagfm_5(x, y)
+        x5 = self.layer4(x4)
+        y5 = self.layer4(y4)
+        output = self.pagfm_5(x5, y5)
 
         output = self.avg_pool(output)
         output = output.view(output.size(0), -1)
